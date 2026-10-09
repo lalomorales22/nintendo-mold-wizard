@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cart-red: #e60012;
+  --color-ink: #0f1115;
+  --font-display: "Press Start 2P", ui-monospace, monospace;
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-ink text-zinc-100 antialiased; }
+
+.input {
+  @apply w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-cart-red focus:outline-none;
+}
+.label { @apply mb-1 block text-xs font-semibold uppercase tracking-wider text-zinc-400; }
+.btn-primary { @apply inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 bg-cart-red text-white hover:bg-red-500; }
+.btn-ghost { @apply inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 border border-zinc-700 text-zinc-200 hover:bg-zinc-800; }
+.card { @apply rounded-xl border border-zinc-800 bg-zinc-900/60 p-5; }
+.chip { @apply rounded-full border border-zinc-700 px-2.5 py-0.5 text-xs text-zinc-300; }
