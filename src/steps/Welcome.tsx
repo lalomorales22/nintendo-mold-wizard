@@ -1,32 +1,13 @@
-import { Field, StepHeader } from '../components/ui'
+import { Field } from '../components/ui'
 import type { StepProps } from './types'
 
 export function Welcome({ state, dispatch }: StepProps) {
   const t = state.template
-  return (
-    <div>
-      <StepHeader kicker="Step 1 · Welcome" title="Forge a game from a classic mold">
-        Every console-era game sits on a handful of repeatable molds: a perspective, a cast, a set of levels, and the knobs
-        that make it feel right. Fill in the mold step by step and Moldforge generates the whole game from that template.
-      </StepHeader>
-      <div className="card grid gap-4 md:max-w-xl">
-        <Field label="Game title">
-          <input className="input" autoFocus value={t.gameTitle} placeholder="e.g. Charge Quest"
-            onChange={(e) => dispatch({ type: 'setMeta', patch: { gameTitle: e.target.value } })} />
-        </Field>
-        <Field label="One-line pitch" hint="What is the game about, in one sentence?">
-          <textarea className="input min-h-20" value={t.pitch} placeholder="A Tesla driver crosses the border at midnight hunting for cheap electrons."
-            onChange={(e) => dispatch({ type: 'setMeta', patch: { pitch: e.target.value } })} />
-        </Field>
-      </div>
-      <p className="mt-4 text-sm text-zinc-500">
-        Just looking? <button type="button" className="text-cart-red hover:underline" onClick={() => dispatch({ type: 'loadExample' })}>Load the example game</button> and click through every step.
-      </p>
-      <ol className="mt-8 grid gap-3 text-sm text-zinc-400 md:grid-cols-4">
-        {['Pick a perspective mold', 'Build your cast', 'Lay out levels', 'Tune parameters, then generate'].map((s, i) => (
-          <li key={s} className="rounded-lg border border-zinc-800 p-3"><span className="mr-2 font-mono text-cart-red">{i + 2}</span>{s}</li>
-        ))}
-      </ol>
-    </div>
-  )
+  return <div className="welcome-view">
+    <div className="hero-heading"><div><p className="eyebrow">FROM A LITTLE IDEA TO PRESS START</p><h1 className="page-title">You dream it.<br /><span>Let’s make it playable.</span></h1><p className="hero-copy">That game you’ve had in your head since you were a kid?<br className="hidden md:block" /> This is where it gets its first life.</p></div><div className="hero-cartridge" aria-hidden="true"><div className="hero-cart-lines" /><div className="hero-cart-label"><span>MOLDFORGE ORIGINAL</span><div className="pixel-landscape"><span className="pixel-moon" /><span className="pixel-hill one" /><span className="pixel-hill two" /><span className="pixel-hero" /><span className="pixel-star">✦</span></div><strong>YOUR NEXT<br />ADVENTURE</strong><small>ONE GOOD IDEA · INFINITE CONTINUES</small></div><div className="hero-cart-notch" /></div></div>
+    <div className="welcome-grid"><section className="idea-card"><div className="flex items-center gap-3"><span className="section-number">01</span><div><h2 className="text-lg font-bold">Start with a spark.</h2><p className="text-xs text-zinc-400">A name, a world, a slightly ridiculous idea.</p></div></div><div className="mt-6 grid gap-5"><Field label="What’s your game called?"><input className="input" autoFocus maxLength={100} value={t.gameTitle} placeholder="e.g. Midnight Moon Delivery" onChange={e => dispatch({ type: 'setMeta', patch: { gameTitle: e.target.value } })} /></Field><Field label="Give us the one-line pitch" hint="Who’s our hero? What’s their adventure?"><textarea className="input min-h-28" maxLength={3000} value={t.pitch} placeholder="A tiny space courier hops across rooftop gardens to deliver the last letter on the moon." onChange={e => dispatch({ type: 'setMeta', patch: { pitch: e.target.value } })} /></Field></div></section>
+    <aside className="starter-card"><span className="tiny-stars">✦ · ✧</span><p className="eyebrow">NEED A RUNNING START?</p><h2>Meet Charge Quest.</h2><p>A midnight driver. A nearly dead battery. One last chance to make it home.</p><div className="starter-tags"><span>2D PLATFORMER</span><span>2 STAGES</span><span>LOTS OF HEART</span></div><button className="btn-ghost w-full justify-center" onClick={() => dispatch({ type: 'loadExample' })}>Load the example game ↗</button><small>Ready to customize. Play the free starter at Review.</small></aside></div>
+    <div className="how-it-works">{[['01','Dream up a world','Pick a mold, cast your heroes, set the scene.'],['02','Give it a little magic','OpenAI creates code and original game art.'],['03','Keep your cartridge','Play, save, remix, download. It’s yours.']].map(([n,title,copy]) => <div key={n}><span>{n}</span><h3>{title}</h3><p>{copy}</p></div>)}</div>
+    <p className="scope-note">Original console-inspired browser games · Standalone HTML downloads · No emulator required</p>
+  </div>
 }

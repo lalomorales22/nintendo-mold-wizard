@@ -1,13 +1,13 @@
 {
   "name": "moldforge",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "node scripts/dev.mjs",
+    "build": "tsc -b && vite build && node scripts/package.mjs",
     "lint": "oxlint",
-    "preview": "vite preview",
+    "preview": "node scripts/dev.mjs --preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "check": "tsc -b && vitest run"
@@ -28,6 +28,6 @@
     "vite": "^8.3.0",
     "vitest": "^5.0.3"
   },
-  "description": "Moldforge: a guided wizard that turns common Nintendo-era game molds into game templates for AI generation. Built on REA.",
+  "description": "Build original retro browser games with OpenAI code and artwork, then save and play your cartridges.",
   "license": "MIT"
 }

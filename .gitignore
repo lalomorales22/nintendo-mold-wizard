@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Credentials and generated games (keep only the blank example)
+.env
+.env.*
+!.env.example
+.moldforge/
+release/

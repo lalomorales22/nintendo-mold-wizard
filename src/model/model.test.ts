@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { MOLDS } from './molds'
-import { jobSnapshot, TOTAL_MS } from './mockJob'
 import { loadState, saveState, STORAGE_KEY } from './storage'
 import { applyPerspective, emptyTemplate, newCharacter, newLevel, validateTemplate } from './template'
 import { PERSPECTIVE_IDS } from './types'
@@ -85,16 +84,5 @@ describe('storage', () => {
     expect(loadState(store)).toEqual(s)
     mem.set(STORAGE_KEY, '{nope')
     expect(loadState(store).step).toBe('welcome')
-  })
-})
-
-describe('mock generation job', () => {
-  it('progresses to done with a manifest', () => {
-    const t = filled().template
-    expect(jobSnapshot('j', t, 0, 0).status).toBe('queued')
-    expect(jobSnapshot('j', t, 0, 3000).status).toBe('generating-assets')
-    const done = jobSnapshot('j', t, 0, TOTAL_MS)
-    expect(done.status).toBe('done')
-    expect(done.result?.files).toContain('charge-quest/levels/1-1.json')
   })
 })

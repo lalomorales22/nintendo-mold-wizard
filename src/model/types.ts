@@ -114,19 +114,38 @@ export interface GameTemplate {
   parameters: SharedParameters
 }
 
-// ---- Generation job (stubbed) ----
+// Generation state persists with the draft; API keys never belong in this model.
 export type JobStatus = 'queued' | 'analyzing-template' | 'generating-assets' | 'building-levels' | 'packaging' | 'done' | 'failed'
-
 export interface GenerationJob {
   id: string
   status: JobStatus
-  progress: number // 0..100
+  progress: number
   log: string[]
   createdAt: string
-  /** When done: a mock manifest describing what *would* be generated. */
-  result?: {
-    title: string
-    files: string[]
-    note: string
-  }
+  result?: { title: string; files: string[]; note: string }
+}
+
+export interface Cartridge {
+  id: string
+  title: string
+  pitch: string
+  perspective: PerspectiveId
+  createdAt: string
+  state: 'draft' | 'code' | 'ready'
+  provider: 'openai' | 'starter'
+  withArt: boolean
+  hasArt: boolean
+  published: boolean
+  owned: boolean
+  summary: string
+  instructions: string
+  error: string | null
+  levelCount: number
+  artStyle: string
+}
+export interface ApiConfig {
+  csrf: string
+  serverKeyAvailable: boolean
+  codeModel: string
+  imageModel: string
 }

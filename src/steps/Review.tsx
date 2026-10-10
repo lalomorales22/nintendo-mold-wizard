@@ -1,33 +1,18 @@
-import { useEffect, useRef, useState } from 'react'
-import { pollJob, startGeneration } from '../api/generate'
+import { getGame } from '../api/generate'
+import { useStudio } from '../studio'
 import { StepHeader } from '../components/ui'
 import { getMold } from '../model/molds'
 import { validateTemplate } from '../model/template'
 import type { StepProps } from './types'
 
-export function Review({ state, dispatch }: StepProps) {
+export function Review({ state }: StepProps) {
   const t = state.template
   const job = state.job
   const issues = validateTemplate(t)
   const mold = getMold(t.perspective)
-  const [error, setError] = useState<string | null>(null)
-  const timer = useRef<number | null>(null)
-
-  const running = !!job && job.status !== 'done' && job.status !== 'failed'
-
-  useEffect(() => {
-    if (!running || !job) return
-    timer.current = window.setTimeout(async () => {
-      try { dispatch({ type: 'setJob', job: await pollJob(job.id) }) }
-      catch (e) { setError(String(e)); dispatch({ type: 'setJob', job: { ...job, status: 'failed' } }) }
-    }, 500)
-    return () => { if (timer.current) window.clearTimeout(timer.current) }
-  }, [job, running, dispatch])
-
-  const generate = async () => {
-    setError(null)
-    dispatch({ type: 'setJob', job: await startGeneration(t) })
-  }
+  const studio = useStudio()
+  const running = studio.busy
+  const generate = () => studio.generate()
 
   const download = () => {
     const blob = new Blob([JSON.stringify(t, null, 2)], { type: 'application/json' })
@@ -98,9 +83,11 @@ export function Review({ state, dispatch }: StepProps) {
             {running ? 'Generating…' : job?.status === 'done' ? 'Generate again' : '▶ Generate game'}
           </button>
           <button type="button" className="btn-ghost" onClick={download}>Download template JSON</button>
-          <span className="text-xs text-zinc-500">Generation is a local mock right now. No AI service is called.</span>
+          <label className="flex items-center gap-2 text-sm text-zinc-300"><input id="with-art" type="checkbox" defaultChecked /> Generate original sprite artwork</label>
         </div>
 
+        <p className="mt-4 text-xs leading-relaxed text-zinc-400">OpenAI writes a complete browser game from these sheets. Artwork adds a separate image request. Your cartridge saves privately to your gallery. Keep this tab open while generating; interrupted drafts can be resumed.</p>
+        {t.perspective === 'platformer-2d' && <button className="mt-4 text-sm text-emerald-300 hover:underline" disabled={running || issues.length > 0} onClick={() => studio.generate(true)}>Try the playable starter instead · no API key needed →</button>}
         {job && (
           <div className="mt-4">
             <div className="flex justify-between text-xs text-zinc-400"><span className="font-mono">{job.id} · {job.status}</span><span>{job.progress}%</span></div>
@@ -109,12 +96,13 @@ export function Review({ state, dispatch }: StepProps) {
             {job.result && (
               <div className="mt-3 text-sm">
                 <p className="text-zinc-300">{job.result.note}</p>
+                <div className="mt-3 flex gap-2"><button className="btn-primary" onClick={async () => { try { studio.play((await getGame(job.id)).game) } catch (e) { studio.setError((e as Error).message) } }}>▶ Play game</button><button className="btn-ghost" onClick={studio.showGallery}>Open gallery</button></div>
                 <ul className="mt-1 font-mono text-xs text-zinc-400">{job.result.files.map((f) => <li key={f}>{f}</li>)}</ul>
               </div>
             )}
           </div>
         )}
-        {error && <p className="mt-2 text-sm text-cart-red">{error}</p>}
+        {job && job.status !== 'done' && !running && <button className="btn-ghost mt-4" disabled={running} onClick={() => studio.generate(false, job.id)}>Resume saved cartridge</button>}
       </section>
     </div>
   )
