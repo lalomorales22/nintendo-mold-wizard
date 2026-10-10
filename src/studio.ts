@@ -8,6 +8,10 @@ export interface Studio {
   settingsOpen: boolean
   setSettingsOpen: (open: boolean) => void
   busy: boolean
+  generationMessage: string
+  withArt: boolean
+  setWithArt: (enabled: boolean) => void
+  newGame: () => void
   error: string | null
   setError: (error: string | null) => void
   revision: number

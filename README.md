@@ -34,6 +34,8 @@ This makes a real two-stage Charge Quest platformer with pixel artwork, enemies,
 
 ## Generate and play
 
+Use **Create** or **New game** to choose **Start new game** or **Continue this draft**. Starting fresh clears the editor; saved gallery cartridges stay available. Download a draft's template JSON before replacing it if you want to keep that unfinished design.
+
 1. Name the game and describe its premise.
 2. Pick a mold, define heroes/enemies and their abilities, add stages, and set physics and win/lose conditions.
 3. In Review, choose whether to generate original artwork, then **Generate game**.
@@ -41,6 +43,8 @@ This makes a real two-stage Charge Quest platformer with pixel artwork, enemies,
 5. The finished cartridge opens in the isolated player and remains in **My cartridges**. Play it, heart it, download the standalone HTML, remix its template, or explicitly **Publish to arcade**.
 
 Code and art are separate recoverable stages. An image failure preserves the game code. Resume from the gallery, or **Finish without art** to use the code’s drawn fallbacks. There are no hidden paid retries. Keep the tab open during generation; after an interrupted request, a lock can remain for up to four minutes. Completed stages are reused on resume. A timeout occurring after OpenAI accepted a request can still incur a charge; retrying that incomplete stage is a new request.
+
+Editing a draft clears its previous generation result so **Play** cannot open an older design. **Generate again** creates a separate cartridge; **Resume saved cartridge** continues an existing one. Missing keys and request failures appear beside the generation controls, and missing-key attempts open API settings. Existing drafts are preserved when upgrading, but old generation links without a matching template are cleared; those games remain in the gallery.
 
 ### Player and saves
 
@@ -97,7 +101,8 @@ The integration tests launch an isolated PHP server and a **local fixture of Ope
 - `scripts/dev.mjs`: starts PHP and Vite together.
 - `scripts/package.mjs`: adds the PHP API and `.htaccess` to the production build.
 - `src/App.tsx`: studio navigation and generation orchestration.
-- `src/components/{Gallery,Player,Settings}.tsx`: cartridge shelf, isolated player, private key entry.
+- `src/components/{Create,Gallery,Player,Settings}.tsx`: new-game chooser, cartridge shelf, isolated player, private key entry.
+- `src/model/generation.ts`: generation attempts, explicit resume, progress and template-bound results.
 - `src/api/generate.ts`: real API calls; errors are never replaced with mock success.
 - `src/model/`: editable template, molds, wizard state and browser persistence.
 

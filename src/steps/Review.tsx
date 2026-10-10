@@ -1,4 +1,5 @@
 import { getGame } from '../api/generate'
+import { matchingJob, templateKey } from '../model/wizard'
 import { useStudio } from '../studio'
 import { StepHeader } from '../components/ui'
 import { getMold } from '../model/molds'
@@ -7,7 +8,7 @@ import type { StepProps } from './types'
 
 export function Review({ state }: StepProps) {
   const t = state.template
-  const job = state.job
+  const job = matchingJob(state)
   const issues = validateTemplate(t)
   const mold = getMold(t.perspective)
   const studio = useStudio()
@@ -83,9 +84,13 @@ export function Review({ state }: StepProps) {
             {running ? 'Generating…' : job?.status === 'done' ? 'Generate again' : '▶ Generate game'}
           </button>
           <button type="button" className="btn-ghost" onClick={download}>Download template JSON</button>
-          <label className="flex items-center gap-2 text-sm text-zinc-300"><input id="with-art" type="checkbox" defaultChecked /> Generate original sprite artwork</label>
+          <label className="flex items-center gap-2 text-sm text-zinc-300"><input id="with-art" type="checkbox" checked={studio.withArt} onChange={e => studio.setWithArt(e.target.checked)} /> Generate original sprite artwork</label>
         </div>
 
+        {!studio.apiKey.trim() && !studio.config?.serverKeyAvailable && <div className="generation-key-notice"><p><b>Connect OpenAI to generate this game.</b> No API key is configured yet. Enter your own key in settings, or add OPENAI_API_KEY to your local .env file.</p><button className="btn-ghost" onClick={() => studio.setSettingsOpen(true)}>Enter API key</button></div>}
+        {studio.error && <div className="error-banner mt-4" role="alert">{studio.error}</div>}
+        {running && <p className="generation-notice mt-4" role="status">{studio.generationMessage || 'Starting generation…'}</p>}
+        {!job && !running && <p className="mt-4 text-sm text-zinc-300">This draft has no playable cartridge yet. Generate it to create a new game; your earlier games are in the gallery.</p>}
         <p className="mt-4 text-xs leading-relaxed text-zinc-400">OpenAI writes a complete browser game from these sheets. Artwork adds a separate image request. Your cartridge saves privately to your gallery. Keep this tab open while generating; interrupted drafts can be resumed.</p>
         {t.perspective === 'platformer-2d' && <button className="mt-4 text-sm text-emerald-300 hover:underline" disabled={running || issues.length > 0} onClick={() => studio.generate(true)}>Try the playable starter instead · no API key needed →</button>}
         {job && (
@@ -96,7 +101,7 @@ export function Review({ state }: StepProps) {
             {job.result && (
               <div className="mt-3 text-sm">
                 <p className="text-zinc-300">{job.result.note}</p>
-                <div className="mt-3 flex gap-2"><button className="btn-primary" onClick={async () => { try { studio.play((await getGame(job.id)).game) } catch (e) { studio.setError((e as Error).message) } }}>▶ Play game</button><button className="btn-ghost" onClick={studio.showGallery}>Open gallery</button></div>
+                <div className="mt-3 flex gap-2"><button className="btn-primary" onClick={async () => { try { const saved = await getGame(job.id); if (templateKey(saved.template) !== templateKey(t)) throw new Error('This cartridge belongs to an earlier template. Generate this draft to play your new game.'); studio.play(saved.game) } catch (e) { studio.setError((e as Error).message) } }}>▶ Play {job.result.title}</button><button className="btn-ghost" onClick={studio.showGallery}>Open gallery</button></div>
                 <ul className="mt-1 font-mono text-xs text-zinc-400">{job.result.files.map((f) => <li key={f}>{f}</li>)}</ul>
               </div>
             )}

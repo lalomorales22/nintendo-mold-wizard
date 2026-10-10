@@ -39,6 +39,15 @@ export type WizardAction =
   | { type: 'loadExample' }
   | { type: 'load'; state: WizardState }
 
+export const templateKey = (template: GameTemplate) => JSON.stringify(template)
+export const matchingJob = (state: WizardState): GenerationJob | null =>
+  state.job?.templateKey === templateKey(state.template) ? state.job : null
+
+function editTemplate(state: WizardState, template: GameTemplate): WizardState {
+  if (templateKey(template) === templateKey(state.template)) return state
+  return { ...state, template, job: null }
+}
+
 export function initialState(): WizardState {
   return { step: 'welcome', maxReached: 0, template: emptyTemplate(), job: null }
 }
@@ -100,41 +109,38 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       return idx === 0 ? state : { ...state, step: STEPS[idx - 1] }
     }
     case 'setMeta':
-      return { ...state, template: { ...t, ...action.patch } }
+      return editTemplate(state, { ...t, ...action.patch })
     case 'setPerspective':
-      return { ...state, template: applyPerspective(t, action.id) }
+      return editTemplate(state, applyPerspective(t, action.id))
     case 'upsertCharacter':
-      return { ...state, template: { ...t, characters: upsert(t.characters, action.character) } }
+      return editTemplate(state, { ...t, characters: upsert(t.characters, action.character) })
     case 'removeCharacter':
-      return {
-        ...state,
-        template: {
-          ...t,
-          characters: t.characters.filter((c) => c.id !== action.id),
-          levels: t.levels.map((l) => ({ ...l, enemyIds: l.enemyIds.filter((e) => e !== action.id) })),
-        },
-      }
+      return editTemplate(state, {
+        ...t,
+        characters: t.characters.filter((c) => c.id !== action.id),
+        levels: t.levels.map((l) => ({ ...l, enemyIds: l.enemyIds.filter((e) => e !== action.id) })),
+      })
     case 'upsertLevel':
-      return { ...state, template: { ...t, levels: upsert(t.levels, action.level) } }
+      return editTemplate(state, { ...t, levels: upsert(t.levels, action.level) })
     case 'removeLevel':
-      return { ...state, template: { ...t, levels: t.levels.filter((l) => l.id !== action.id) } }
+      return editTemplate(state, { ...t, levels: t.levels.filter((l) => l.id !== action.id) })
     case 'moveLevel': {
       const i = t.levels.findIndex((l) => l.id === action.id)
       const j = i + action.dir
       if (i === -1 || j < 0 || j >= t.levels.length) return state
       const levels = t.levels.slice()
       ;[levels[i], levels[j]] = [levels[j], levels[i]]
-      return { ...state, template: { ...t, levels } }
+      return editTemplate(state, { ...t, levels })
     }
     case 'setParameters':
-      return { ...state, template: { ...t, parameters: { ...t.parameters, ...action.patch } } }
+      return editTemplate(state, { ...t, parameters: { ...t.parameters, ...action.patch } })
     case 'setJob':
-      return { ...state, job: action.job }
+      return action.job && action.job.templateKey !== templateKey(t) ? state : { ...state, job: action.job }
     case 'reset':
       return initialState()
     case 'loadExample':
       return { step: 'welcome', maxReached: STEPS.length - 1, template: exampleTemplate(), job: null }
     case 'load':
-      return action.state
+      return { ...action.state, job: matchingJob(action.state) }
   }
 }

@@ -1,4 +1,4 @@
-import { initialState, STEPS, type WizardState } from './wizard'
+import { initialState, matchingJob, STEPS, type WizardState } from './wizard'
 
 export const STORAGE_KEY = 'moldforge.wizard.v1'
 
@@ -12,7 +12,7 @@ export function loadState(storage: Pick<Storage, 'getItem'> | undefined = global
     if (typeof t.gameTitle !== 'string' || typeof t.pitch !== 'string' || !Array.isArray(t.characters) || !Array.isArray(t.levels) || !t.parameters?.physics || !Array.isArray(t.parameters.winConditions) || !Array.isArray(t.parameters.loseConditions)) return initialState()
     if (!Number.isInteger(parsed.maxReached) || parsed.maxReached < 0 || parsed.maxReached >= STEPS.length) return initialState()
     if (t.characters.some(c => typeof c.name !== 'string' || !c.stats || !Array.isArray(c.abilities) || !Array.isArray(c.assets)) || t.levels.some(l => typeof l.name !== 'string' || !Array.isArray(l.enemyIds) || !Array.isArray(l.collectibles) || !Array.isArray(l.exits) || !Array.isArray(l.musicMoodTags))) return initialState()
-    return parsed
+    return { ...parsed, job: matchingJob(parsed) }
   } catch {
     return initialState()
   }

@@ -118,6 +118,8 @@ export interface GameTemplate {
 export type JobStatus = 'queued' | 'analyzing-template' | 'generating-assets' | 'building-levels' | 'packaging' | 'done' | 'failed'
 export interface GenerationJob {
   id: string
+  /** Exact editor snapshot that produced this cartridge. Never reuse it after edits. */
+  templateKey: string
   status: JobStatus
   progress: number
   log: string[]
