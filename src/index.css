@@ -380,3 +380,6 @@ input[type="checkbox"] { accent-color: #d92e36; }
 @media(max-width:950px) { .provider-settings-grid { grid-template-columns:1fr; } }
 @media(max-width:650px) { .arena-contenders,.model-picker,.arena-models { grid-template-columns:1fr; } .arena-vs { text-align:center; } .arena-match-heading { align-items:stretch; flex-direction:column; } .arena-match-heading .label { width:100%; } }
 @media(max-width:600px) { .sprite-workbench { grid-template-columns:1fr; } .sprite-preview canvas { width:192px; } }
+
+.sprite-recovery-source { max-width:560px; margin:auto; background:repeating-conic-gradient(#969b8e 0% 25%,#c8cbbc 0% 50%) 0/20px 20px; }
+.sprite-recovery-source img { display:block; width:100%; image-rendering:pixelated; }

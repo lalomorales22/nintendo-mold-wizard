@@ -151,6 +151,8 @@ function metadata(array $g, string $owner): array {
         'codeModel'=>$g['code_model']??null,'arenaId'=>$g['arena_id']??null,
         'assets'=>assetManifest($p['assetLayout'] ?? 'legacy-v1'), 'hasArt'=>!empty($g['image']), 'published'=>(bool)$g['published'], 'owned'=>$g['owner']===$owner,
         'summary'=>$p['summary'] ?? '', 'instructions'=>$p['instructions'] ?? '', 'error'=>$g['error'],
+        'artNote'=>$p['artNote']??null,
+        'hasSourceArt'=>$g['owner']===$owner && !$g['image'] && $g['state']==='code' && (bool)query('SELECT 1 FROM game_revisions WHERE game_id=? AND image IS NOT NULL LIMIT 1',[$g['id']])->fetchColumn(),
         'levelCount'=>count($t['levels']), 'artStyle'=>$t['parameters']['artStyle']];
 }
 function openai(string $endpoint, array $payload, string $key, bool $get=false): array {
@@ -347,7 +349,7 @@ function assetManifest(string $layout): array {
     return ['version'=>'animated-v1','columns'=>8,'rows'=>8,'frames'=>4,'directions'=>['down','left','right','up'],
         'actors'=>['hero'=>[0,0],'enemy'=>[4,0],'boss'=>[0,4]],'slots'=>[[0,0],[4,0],[4,4],[5,4],[6,4],[0,4]]];
 }
-function generateArt(array $g, string $key): string {
+function generateArt(array $g, string $key): array {
     $t = json_decode($g['template'], true); $p = json_decode($g['payload'], true);
     if (!extension_loaded('gd')) fail('PNG sprite checks require the PHP GD extension. Enable GD or finish without art.', 503);
     $animated = ($p['assetLayout'] ?? '') === 'animated-v1';
@@ -376,19 +378,20 @@ function generateArt(array $g, string $key): string {
     if ($animated) {
         // Preserve the paid source even if its layout cannot be packed safely.
         query('INSERT INTO game_revisions (game_id,saved_at,payload,image) VALUES (?,?,?,?)',[$g['id'],gmdate('c'),$g['payload'],$image]);
-        return fitAnimatedSprites($image);
+        $note=null;$fitted=fitAnimatedSprites($image,$note);
+        return ['image'=>$fitted,'note'=>$note];
     }
-    return $image;
+    return ['image'=>$image,'note'=>null];
 }
 /** Find complete opaque silhouettes, not presumed fixed grid boundaries. */
-function spriteBounds(GdImage $source): array {
+function spriteBounds(GdImage $source,int $gap=8): array {
     $w=imagesx($source);$h=imagesy($source);
     imagepalettetotruecolor($source);
     // Tiny isolated noise and faint glow are not part of a pixel-art silhouette.
-    $runs=static function(array $counts,int $minimum):array {
+    $runs=static function(array $counts,int $minimum)use($gap):array {
         $runs=[];$start=null;$last=-1;
         foreach($counts as $position=>$count)if($count>=$minimum){
-            if($start!==null && $position-$last>8){$runs[]=[$start,$last];$start=null;}
+            if($start!==null && $position-$last>$gap){$runs[]=[$start,$last];$start=null;}
             if($start===null)$start=$position;
             $last=$position;
         }
@@ -397,15 +400,29 @@ function spriteBounds(GdImage $source): array {
     };
     $rowCounts=array_fill(0,$h,0);
     for($y=0;$y<$h;$y++)for($x=0;$x<$w;$x++)if(((imagecolorat($source,$x,$y)>>24)&127)<96)$rowCounts[$y]++;
-    $rows=[];
-    foreach($runs($rowCounts,6) as [$top,$bottom]){
+    // Clamp expansion at a genuinely empty gutter, so a nearby frame cannot be
+    // captured twice. Never split a visible silhouette merely to match the grid.
+    $dividers=static function(array $spans,array $counts):?array {
+        $cuts=[];
+        for($i=0;$i<count($spans)-1;$i++){
+            $middle=($spans[$i][1]+$spans[$i+1][0])/2;$best=null;
+            for($p=$spans[$i][1]+1;$p<$spans[$i+1][0];$p++)if($counts[$p]===0 && ($best===null||abs($p-$middle)<abs($best-$middle)))$best=$p;
+            if($best===null)return null;$cuts[]=$best;
+        }
+        return $cuts;
+    };
+    $rows=[];$rowSpans=$runs($rowCounts,6);$rowCuts=$dividers($rowSpans,$rowCounts);
+    if($rowCuts===null)return [];
+    foreach($rowSpans as $rowIndex=>[$top,$bottom]){
+        $top=max(0,$top-7,($rowCuts[$rowIndex-1]??-1)+1);$bottom=min($h-1,$bottom+7,$rowCuts[$rowIndex]??$h-1);
         $columns=array_fill(0,$w,0);
         for($y=$top;$y<=$bottom;$y++)for($x=0;$x<$w;$x++)if(((imagecolorat($source,$x,$y)>>24)&127)<96)$columns[$x]++;
-        $row=[];
-        foreach($runs($columns,3) as [$left,$right]){
+        $row=[];$spans=$runs($columns,3);$cuts=$dividers($spans,$columns);
+        if($cuts===null)return [];
+        foreach($spans as $index=>[$left,$right]){
+            $left=max(0,$left-7,($cuts[$index-1]??-1)+1);$right=min($w-1,$right+7,$cuts[$index]??$w-1);
             $x0=$w;$y0=$h;$x1=-1;$y1=-1;
-            // Expand into the transparent gutter to retain detached details.
-            for($y=max(0,$top-7);$y<=min($h-1,$bottom+7);$y++)for($x=max(0,$left-7);$x<=min($w-1,$right+7);$x++){
+            for($y=$top;$y<=$bottom;$y++)for($x=$left;$x<=$right;$x++){
                 if(((imagecolorat($source,$x,$y)>>24)&127)>=96)continue;
                 $x0=min($x0,$x);$y0=min($y0,$y);$x1=max($x1,$x);$y1=max($y1,$y);
             }
@@ -435,24 +452,65 @@ function packSpriteFrames(GdImage $source,array $frames): string {
     ob_start();imagepng($out);$bytes=ob_get_clean();imagedestroy($out);
     return base64_encode($bytes);
 }
-function fitAnimatedSprites(string $image): string {
+/** Only these two measured arrangements have an unambiguous frame-count mapping. */
+function spriteFrameMap(array $rows): ?array {
+    $counts=array_map('count',$rows);$standard=$counts===[8,8,8,8,7,4,4,4];
+    $compact=$counts===[8,8,8,8,8,8,3] || $counts===[8,8,8,8,8,8,4];
+    if(!$standard && !$compact)return null;
+    $frames=[];
+    foreach($rows as $row=>$bounds)foreach($bounds as $col=>$rect){
+        if($standard || $row<4){
+            $group=$row<4?($col<4?'hero':'enemy'):($col<4?'boss':'prop-'.$col);
+            $cell=[$col,$row];
+        }elseif($row<6){
+            // The 16 boss poses were folded from 4x4 to 8x2. Preserve reading order.
+            $index=($row-4)*8+$col;$group='boss';$cell=[$index%4,4+intdiv($index,4)];
+        }else{
+            if($col>=3)continue; // The unused fourth prop remains in the saved source.
+            $group='prop-'.($col+4);$cell=[$col+4,4];
+        }
+        $frames[]=['bounds'=>$rect,'cell'=>$cell,'group'=>$group];
+    }
+    return ['frames'=>$frames,'compact'=>$compact,'extraProp'=>$compact && end($counts)===4];
+}
+function separateSpriteFrames(array $frames): bool {
+    foreach($frames as $i=>$a)foreach(array_slice($frames,$i+1) as $b){
+        [$x,$y,$w,$h]=$a['bounds'];[$bx,$by,$bw,$bh]=$b['bounds'];
+        if($x<$bx+$bw&&$bx<$x+$w&&$y<$by+$bh&&$by<$y+$h)return false;
+    }
+    return true;
+}
+function fitAnimatedSprites(string $image,?string &$note=null): string {
     $source=@imagecreatefromstring(base64_decode($image,true));
     if(!$source || imagesx($source)!==1024 || imagesy($source)!==1024)fail('Sprite fitting requires a 1024 by 1024 PNG.',422);
+    $note=null;
     try {
-        $rows=spriteBounds($source);$counts=array_map('count',$rows);
-        if($counts!==[8,8,8,8,7,4,4,4])fail('The artwork has overlapping, missing or misarranged sprite frames. Code and source artwork are saved; retry artwork or finish without art.',502);
-        $frames=[];
-        foreach($rows as $row=>$bounds)foreach($bounds as $col=>$rect){
-            $group=$row<4?($col<4?'hero':'enemy'):($col<4?'boss':'prop-'.$col);
-            $frames[]=['bounds'=>$rect,'cell'=>[$col,$row],'group'=>$group];
+        $map=spriteFrameMap(spriteBounds($source));$tight=false;
+        if(!$map || !separateSpriteFrames($map['frames'])){
+            // A faint halo can join close sprites. Retry segmentation on strong alpha;
+            // never cut through an opaque silhouette to force a presumed cell size.
+            imagealphablending($source,false);imagesavealpha($source,true);
+            for($y=0;$y<1024;$y++)for($x=0;$x<1024;$x++)if(((imagecolorat($source,$x,$y)>>24)&127)>=32)imagesetpixel($source,$x,$y,0x7f000000);
+            $map=spriteFrameMap(spriteBounds($source,3));$tight=true;
         }
-        // Adjacent frames must never share any source pixels.
-        foreach($frames as $i=>$a)foreach(array_slice($frames,$i+1) as $b){
-            [$x,$y,$w,$h]=$a['bounds'];[$bx,$by,$bw,$bh]=$b['bounds'];
-            if($x<$bx+$bw&&$bx<$x+$w&&$y<$by+$bh&&$by<$y+$h)fail('Two sprite silhouettes overlap. Code and source artwork are saved; retry artwork or finish without art.',502);
-        }
-        return packSpriteFrames($source,$frames);
+        if(!$map)fail('The saved artwork does not contain a supported set of complete sprite frames. Choose Fit saved artwork for free fitting, retry artwork, or finish without art. Code and source artwork are kept.',502);
+        if(!separateSpriteFrames($map['frames']))fail('Two sprite silhouettes overlap. Code and source artwork are saved; retry artwork or finish without art.',502);
+        $fitted=packSpriteFrames($source,$map['frames']);
+        if($map['compact'])$note='Recovered a compact sprite layout: boss poses were repacked in reading order. Review facing directions in View sprites.'.($map['extraProp']?' The extra fourth prop remains in the source image.':'');
+        elseif($tight)$note='Closely spaced sprites were separated by their transparency and fitted into padded cells. Review poses in View sprites.';
+        return $fitted;
     } finally {imagedestroy($source);}
+}
+function artPayload(array $g,?string $note): string {
+    $payload=json_decode($g['payload'],true);unset($payload['artNote']);
+    if($note!==null)$payload['artNote']=$note;
+    return json_encode($payload,JSON_THROW_ON_ERROR);
+}
+function savedSpriteSource(array $g): string {
+    if(!$g['payload'] || (json_decode($g['payload'],true)['assetLayout']??'')!=='animated-v1')fail('This cartridge has no recoverable animated sprite source.',409);
+    $source=query('SELECT image FROM game_revisions WHERE game_id=? AND image IS NOT NULL ORDER BY rowid DESC LIMIT 1',[$g['id']])->fetchColumn();
+    if(!$source)fail('No saved source artwork was found.',404);
+    return $source;
 }
 /** Remove only border-connected, nearly uniform mattes from legacy character cells. */
 function cleanSpriteBackgrounds(array $g): string {
@@ -647,8 +705,8 @@ try {
     $owner = hash('sha256', $token); $csrf = hash('sha256', 'csrf:' . $token);
     $action = $_GET['action'] ?? 'config'; $method = $_SERVER['REQUEST_METHOD'];
     if (!is_string($action)) fail('Invalid action.');
-    $getActions = ['config','list','get','play','download','art','probe','arenas','arena'];
-    $postActions = ['clean-art','create','demo','step','publish','delete','validate','repair','plan','models','arena-create','arena-vote'];
+    $getActions = ['config','list','get','play','download','art','source-art','probe','arenas','arena'];
+    $postActions = ['recover-art','clean-art','create','demo','step','publish','delete','validate','repair','plan','models','arena-create','arena-vote'];
     if (!in_array($action, array_merge($getActions,$postActions),true)) fail('Unknown API action.',404);
     if (($method !== 'GET' || !in_array($action,$getActions,true)) && ($method !== 'POST' || !in_array($action,$postActions,true))) fail('Method not allowed.',405);
     if ($method === 'POST') {
@@ -737,7 +795,7 @@ try {
     }
     $id=$method==='POST'?($b['id']??''):($_GET['id']??'');
     if (!is_string($id)) fail('Invalid game ID.');
-    $g=game($id,$owner,$method==='POST'||$action==='probe');
+    $g=game($id,$owner,$method==='POST'||in_array($action,['probe','source-art'],true));
     if ($action==='get') respond(['game'=>metadata($g,$owner),'template'=>json_decode($g['template'],true)]);
     if ($action==='publish') {
         if ($g['state']!=='ready') fail('Finish the game before publishing.');
@@ -762,6 +820,23 @@ try {
         }
         $state=$g['with_art']&&!$g['image']?'code':'ready';
         query('UPDATE games SET state = ?, error = NULL WHERE id = ?',[$state,$id]);
+        respond(metadata(game($id,$owner),$owner));
+    }
+    if ($action==='source-art') {
+        header('Content-Type: image/png');echo base64_decode(savedSpriteSource($g));exit;
+    }
+    if ($action==='recover-art') {
+        if(!extension_loaded('gd'))fail('Sprite fitting requires the PHP GD extension.',503);
+        if($g['state']!=='code'||$g['image'])fail('This cartridge is not waiting for artwork recovery.',409);
+        $source=savedSpriteSource($g);
+        $locked=query('UPDATE games SET lease_until=? WHERE id=? AND lease_until<? AND state="code" AND image IS NULL',[time()+240,$id,time()]);
+        if(!$locked->rowCount())fail('Wait for the current generation step to finish.',409);
+        $lockedId=$id;$note=null;$image=fitAnimatedSprites($source,$note);
+        // Keep the original source and the exact prior cartridge before applying the fit.
+        db()->beginTransaction();
+        query('INSERT INTO game_revisions (game_id,saved_at,payload,image) VALUES (?,?,?,?)',[$id,gmdate('c'),$g['payload'],$g['image']]);
+        query('UPDATE games SET image=?,payload=?,state="testing",published=0,error=NULL,lease_until=0 WHERE id=?',[$image,artPayload($g,$note),$id]);
+        db()->commit();$lockedId=null;
         respond(metadata(game($id,$owner),$owner));
     }
     if ($action==='clean-art') {
@@ -803,8 +878,8 @@ try {
         } elseif ($g['state']==='code') {
             if ($b['skipArt']??false) query('UPDATE games SET state = "testing", with_art = 0, lease_until = 0 WHERE id = ?',[$id]);
             else {
-                $image=generateArt($g,$key);
-                query('UPDATE games SET image = ?, state = "testing", lease_until = 0 WHERE id = ?',[$image,$id]);
+                $art=generateArt($g,$key);
+                query('UPDATE games SET image = ?, payload = ?, state = "testing", lease_until = 0 WHERE id = ?',[$art['image'],artPayload($g,$art['note']),$id]);
             }
         } else fail('Unknown generation stage.',409);
         $lockedId=null;unset($key);

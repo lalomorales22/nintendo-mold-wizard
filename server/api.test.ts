@@ -23,11 +23,15 @@ function sheetPng(opaque = false, width = 1024, height = 1024, empty = false, la
     pixels[offset]=200; pixels[offset+1]=50; pixels[offset+2]=100
     pixels[offset+3]=!empty&&opaque?255:0
   }
-  if(!empty&&!opaque) for(let row=0;row<(layout==='missing'?6:8);row++)for(let col=0;col<(row<4?8:row===4?7:4);col++) {
-    const left=layout==='clipped'&&row===0&&col===0?0:layout==='shifted'?48+col*120:33+col*128
-    const top=layout==='shifted'?60+row*115:33+row*128
-    const w=layout==='touching'&&row===0&&col===0?140:63, h=layout==='shifted'?70:63
-    for(let y=top;y<Math.min(height,top+h);y++)for(let x=left;x<Math.min(width,left+w);x++)pixels[y*(width*4+1)+1+x*4+3]=255
+  const compact=layout==='compact', close=layout==='close'
+  if(!empty&&!opaque) for(let row=0;row<(compact?7:layout==='missing'?6:8);row++)for(let col=0;col<(compact?(row<6?8:4):row<4?8:row===4?7:4);col++) {
+    const left=layout==='clipped'&&row===0&&col===0?0:compact||close?20+col*123:layout==='shifted'?48+col*120:33+col*128
+    const top=compact?30+row*140:layout==='shifted'?60+row*115:33+row*128
+    const w=layout==='touching'&&row===0&&col===0?140:compact||close?117:63, h=compact?119:layout==='shifted'?70:63
+    for(let y=top;y<Math.min(height,top+h);y++)for(let x=left;x<Math.min(width,left+w);x++){
+      const pos=y*(width*4+1)+1+x*4
+      pixels[pos]=50+(row*8+col)*3;pixels[pos+3]=255
+    }
   }
   const chunk=(name:string,data:Buffer)=>{const body=Buffer.concat([Buffer.from(name),data]),size=Buffer.alloc(4),crc=Buffer.alloc(4);size.writeUInt32BE(data.length);crc.writeUInt32BE(crc32(body));return Buffer.concat([size,body,crc])}
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(pixels)),chunk('IEND',Buffer.alloc(0))]).toString('base64')
@@ -255,6 +259,68 @@ describe('transparent image acceptance', () => {
     expect(result.unsafe).toBe(0);expect(result.cells).toHaveLength(51);expect(result.sources).toBe(4)
     expect(codeCalls).toBe(calls)
     expect((await accept(g.id)).state).toBe('ready')
+  })
+})
+
+describe('saved sprite recovery', () => {
+  let previousCookie: string, previousCsrf: string
+  beforeAll(async () => {
+    previousCookie=cookie;previousCsrf=csrf
+    const config=await fetch(`${base}?action=config`);cookie=config.headers.get('set-cookie')!.split(';')[0];csrf=(await config.json() as ApiConfig).csrf
+  })
+  afterAll(() => {cookie=previousCookie;csrf=previousCsrf})
+  it('unfolds compact source art for free, retains the source, pads every frame and requires runtime acceptance', async () => {
+    const g=await (await call('create',{template:exampleTemplate(),requestId:'recover-saved-sprites',withArt:true},{key})).json()
+    await call('step',{id:g.id},{key});await accept(g.id)
+    const before=(await (await call('get',undefined,{id:g.id})).json()).game, paid=codeCalls+imageCalls, source=sheetPng(false,1024,1024,false,'compact')
+    const inserted=spawnSync('php',['-r',`
+      $db=new PDO('sqlite:'.$argv[1].'/games.sqlite');$q=$db->prepare('INSERT INTO game_revisions(game_id,saved_at,payload,image) SELECT id,created_at,payload,? FROM games WHERE id=?');$q->execute([getenv('TEST_SPRITE_SOURCE'),$argv[2]]);
+      $db->prepare('UPDATE games SET error="Old grid check rejected the image" WHERE id=?')->execute([$argv[2]]);
+    `,directory,g.id],{encoding:'utf8',env:{...process.env,TEST_SPRITE_SOURCE:source}})
+    expect(inserted.status,inserted.stderr).toBe(0)
+    expect((await (await call('get',undefined,{id:g.id})).json()).game.hasSourceArt).toBe(true)
+    expect(Buffer.from(await (await call('source-art',undefined,{id:g.id})).arrayBuffer()).toString('base64')).toBe(source)
+    expect((await call('source-art',undefined,{id:g.id,cookie:''})).status).toBe(404)
+    expect((await call('recover-art',{id:g.id},{csrf:''})).status).toBe(403)
+    expect((await call('recover-art',undefined,{id:g.id})).status).toBe(405)
+    const stranger=await fetch(`${base}?action=config`), strangerCookie=stranger.headers.get('set-cookie')!.split(';')[0], strangerCsrf=(await stranger.json() as ApiConfig).csrf
+    expect((await call('recover-art',{id:g.id},{cookie:strangerCookie,csrf:strangerCsrf})).status).toBe(404)
+    const r=await call('recover-art',{id:g.id});expect(r.status,await r.clone().text()).toBe(200)
+    const fitted=await r.json();expect(fitted.state).toBe('testing');expect(fitted.hasArt).toBe(true);expect(fitted.hasSourceArt).toBe(false);expect(fitted.buildHash).not.toBe(before.buildHash)
+    expect(fitted.artNote).toContain('compact');expect(fitted.artNote).toContain('extra fourth prop')
+    expect((await call('play',undefined,{id:g.id})).status).toBe(409)
+    const inspection=spawnSync('php',['-r',`
+      $db=new PDO('sqlite:'.$argv[1].'/games.sqlite');$q=$db->prepare('SELECT image FROM games WHERE id=?');$q->execute([$argv[2]]);$im=imagecreatefromstring(base64_decode($q->fetchColumn()));$unsafe=0;$cells=[];
+      for($y=0;$y<1024;$y++)for($x=0;$x<1024;$x++)if(((imagecolorat($im,$x,$y)>>24)&127)<96){if($x%128<16||$x%128>111||$y%128<16||$y%128>111)$unsafe++;$cells[intdiv($y,128)*8+intdiv($x,128)]=true;}
+      $reds=[];foreach([[0,4],[0,5],[0,6],[0,7],[4,4],[5,4],[6,4]] as [$col,$row])$reds[]=(imagecolorat($im,$col*128+64,$row*128+64)>>16)&255;
+      echo json_encode(['unsafe'=>$unsafe,'cells'=>count($cells),'reds'=>$reds]);
+    `,directory,g.id],{encoding:'utf8'})
+    expect(inspection.status,inspection.stderr).toBe(0)
+    expect(JSON.parse(inspection.stdout)).toEqual({unsafe:0,cells:51,reds:[32,36,40,44,48,49,50].map(n=>50+n*3)})
+    expect((await call('recover-art',{id:g.id})).status).toBe(409)
+    expect(Buffer.from(await (await call('source-art',undefined,{id:g.id})).arrayBuffer()).toString('base64')).toBe(source)
+    expect(codeCalls+imageCalls).toBe(paid);expect((await accept(g.id)).state).toBe('ready')
+    await call('publish',{id:g.id,published:true})
+    expect((await call('source-art',undefined,{id:g.id,cookie:strangerCookie})).status).toBe(404)
+  })
+  it('automatically fits a new compact sheet and close valid rows, without a paid retry', async () => {
+    for(const layout of ['compact','close']){
+      const g=await (await call('create',{template:exampleTemplate(),requestId:'new-fit-'+layout,withArt:true},{key})).json()
+      await call('step',{id:g.id},{key});await accept(g.id);const calls=imageCalls
+      imageOverride=sheetPng(false,1024,1024,false,layout)
+      try{const r=await call('step',{id:g.id},{key});expect(r.status,await r.clone().text()).toBe(200);expect((await r.json()).artNote).toBeTruthy()}finally{imageOverride=''}
+      expect(imageCalls).toBe(calls+1);expect((await accept(g.id)).state).toBe('ready')
+    }
+  })
+  it('keeps an incomplete source and code untouched when free fitting cannot recover them', async () => {
+    const g=await (await call('create',{template:exampleTemplate(),requestId:'unrecoverable-sprites',withArt:true},{key})).json()
+    await call('step',{id:g.id},{key});await accept(g.id)
+    imageOverride=sheetPng(false,1024,1024,false,'missing')
+    try{expect((await call('step',{id:g.id},{key})).status).toBe(502)}finally{imageOverride=''}
+    const before=(await (await call('get',undefined,{id:g.id})).json()).game,calls=imageCalls+codeCalls
+    expect((await call('recover-art',{id:g.id})).status).toBe(502)
+    expect((await (await call('get',undefined,{id:g.id})).json()).game).toMatchObject({state:'code',hasArt:false,hasSourceArt:true,buildHash:before.buildHash})
+    expect(imageCalls+codeCalls).toBe(calls)
   })
 })
 

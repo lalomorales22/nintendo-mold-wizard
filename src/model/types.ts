@@ -150,6 +150,8 @@ export interface Cartridge {
   buildHash?: string
   provider: 'openai' | 'anthropic' | 'starter'
   withArt: boolean
+  hasSourceArt?: boolean
+  artNote?: string | null
   hasArt: boolean
   published: boolean
   owned: boolean
