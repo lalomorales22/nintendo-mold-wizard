@@ -1,4 +1,4 @@
-// Core data model for Moldforge.
+// Core data model for Game-Maker.
 // A "mold" is a reusable game-structure template distilled from a family of games
 // (eventually extracted by REA; for now hand-authored in molds.ts).
 

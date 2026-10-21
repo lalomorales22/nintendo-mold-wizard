@@ -6,7 +6,7 @@ export function Welcome({ state, dispatch }: StepProps) {
   return <div className="welcome-view">
     <div className="hero-heading">
       <div>
-        <p className="eyebrow">MOLDFORGE · HOME GAME DEVELOPMENT SYSTEM</p>
+        <p className="eyebrow">Game-Maker · HOME GAME DEVELOPMENT SYSTEM</p>
         <h1 className="page-title">Big ideas.<br /><span>8-bit beginnings.</span></h1>
         <p className="hero-copy">The cartridge you always wanted to play.<br className="hidden md:block" /> Make a world, build your heroes, and press start.</p>
         <span className="insert-credit"><i /> PLAYER 1 · READY TO CREATE</span>
@@ -14,7 +14,7 @@ export function Welcome({ state, dispatch }: StepProps) {
       <div className="hero-console-scene" aria-hidden="true">
         <div className="hero-cartridge">
           <div className="hero-cart-lines" />
-          <div className="hero-cart-label"><span>MOLDFORGE ORIGINAL</span><div className="pixel-landscape"><span className="pixel-moon" /><span className="pixel-hill one" /><span className="pixel-hill two" /><span className="pixel-hero" /><span className="pixel-star">✦</span></div><strong>YOUR NEXT<br />ADVENTURE</strong><small>ONE GOOD IDEA · INFINITE CONTINUES</small></div>
+          <div className="hero-cart-label"><span>Game-Maker ORIGINAL</span><div className="pixel-landscape"><span className="pixel-moon" /><span className="pixel-hill one" /><span className="pixel-hill two" /><span className="pixel-hero" /><span className="pixel-star">✦</span></div><strong>YOUR NEXT<br />ADVENTURE</strong><small>ONE GOOD IDEA · INFINITE CONTINUES</small></div>
           <div className="hero-cart-notch" />
         </div>
         <div className="hero-controller"><div className="controller-face"><div className="controller-dpad" /><div className="controller-center"><span>SELECT &nbsp; START</span><i /><i /></div><div className="controller-buttons"><span>B</span><span>A</span></div></div></div>

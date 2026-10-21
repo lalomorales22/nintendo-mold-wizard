@@ -16,10 +16,10 @@ export function Review({ state }: StepProps) {
   const generate = () => studio.generate()
 
   const download = () => {
-    const blob = new Blob([JSON.stringify(t, null, 2)], { type: 'application/json' })
+    const blob = new Blob([JSON.stringify({ ...t, productName: 'Game-Maker' }, null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
-    a.download = `${(t.gameTitle || 'template').replace(/\W+/g, '-').toLowerCase()}.moldforge.json`
+    a.download = `${(t.gameTitle || 'template').replace(/\W+/g, '-').toLowerCase()}.game-maker.json`
     a.click()
     URL.revokeObjectURL(a.href)
   }

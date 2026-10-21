@@ -1,5 +1,5 @@
 <?php
-/** Moldforge: dependency-free PHP 8.2+ API. Requires cURL and PDO SQLite. */
+/** Game-Maker: dependency-free PHP 8.2+ API. Requires cURL and PDO SQLite. */
 declare(strict_types=1);
 ini_set('display_errors', '0');
 set_time_limit(230);
@@ -473,7 +473,7 @@ try {
         if ($action==='probe' ? !$g['payload'] : $g['state']!=='ready') fail('This cartridge is still being generated.',409);
         header('Content-Type: text/html; charset=utf-8');
         header("Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; media-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
-        if ($action==='download') header('Content-Disposition: attachment; filename="moldforge-'.$id.'.html"');
+        if ($action==='download') header('Content-Disposition: attachment; filename="game-maker-'.$id.'.html"');
         echo gameHtml($g,$action==='probe');exit;
     }
 } catch (Throwable $e) {

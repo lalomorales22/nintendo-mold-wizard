@@ -74,7 +74,7 @@ export default function App() {
   const View = VIEWS[state.step], idx = stepIndex(state.step), blocked = blockReason(state), isLast = idx === STEPS.length - 1
   return <StudioContext.Provider value={{ config, apiKey, setApiKey, settingsOpen, setSettingsOpen, busy, generationMessage, withArt, setWithArt, newGame: () => setPage('create'), error, setError, revision, refresh, generate, play: setPlaying, remix, showGallery: () => setPage('gallery') }}>
     <div className="studio-shell">
-      <aside className="studio-sidebar"><a href="#" className="brand" onClick={e => { e.preventDefault(); setPage('studio') }}><span className="brand-icon">M<span>✦</span></span><span>MOLDFORGE<small>HOMEBREW GAME SYSTEM</small></span></a>
+      <aside className="studio-sidebar"><a href="#" className="brand" onClick={e => { e.preventDefault(); setPage('studio') }}><span className="brand-icon">G<span>✦</span></span><span>Game-Maker<small>HOMEBREW GAME SYSTEM</small></span></a>
         <div className="sidebar-switch"><button className={page === 'create' || page === 'studio' ? 'active' : ''} disabled={busy} onClick={() => { setPage('create'); setError(null) }}>✦ Create</button><button className={page === 'gallery' ? 'active' : ''} onClick={() => setPage('gallery')}>▦ Gallery</button></div>
         <button className="new-game-button" disabled={busy} onClick={() => { setPage('create'); setError(null) }}>＋ New game</button>
         <button className={`rom-nav-button ${page === 'rom' ? 'active' : ''}`} disabled={busy} onClick={() => { setPage('rom'); setError(null) }}>▤ ROM Lab <span>NES / SNES</span></button>
@@ -82,7 +82,7 @@ export default function App() {
         <ol className="wizard-nav">{STEPS.map((s, i) => <li key={s}><button disabled={i > state.maxReached || busy} className={page === 'studio' && s === state.step ? 'active' : ''} onClick={() => { dispatch({ type: 'goto', step: s }); setPage('studio') }}><span className="step-number">{i < idx ? '✓' : `0${i + 1}`}</span>{STEP_LABELS[s]}{page === 'studio' && s === state.step && <span className="step-dot" />}</button></li>)}</ol>
         <div className="sidebar-bottom"><div className="studio-note"><span>✧</span><p>Made for the games<br />you wish existed.</p></div><button className="key-button" onClick={() => setSettingsOpen(!settingsOpen)}><span className={`connection-dot ${apiKey || config?.serverKeyAvailable ? 'connected' : ''}`} />{apiKey || config?.serverKeyAvailable ? 'OpenAI key ready' : 'Connect OpenAI'}<span>↗</span></button><p className="sidebar-fine">Original games. Old-school soul.<br />Built by Lalo Adrian Morales.</p></div>
       </aside>
-      <div className="studio-main"><header className="top-bar"><div><span className="status-light" /> MOLDFORGE / CREATOR SYSTEM</div><span>{busy ? '✦ Forging your cartridge…' : '● POWER ON'}</span></header>
+      <div className="studio-main"><header className="top-bar"><div><span className="status-light" /> Game-Maker / CREATOR SYSTEM</div><span>{busy ? '✦ Building your cartridge…' : '● POWER ON'}</span></header>
         <main className="workspace"><Settings />{error && <div className="error-banner" role="alert"><p>{error}</p><button onClick={() => setError(null)} aria-label="Dismiss error">✕</button></div>}
           {busy && <div className="generation-notice" role="status" aria-live="polite">✦ {generationMessage}</div>}
           <div hidden={page !== 'rom'}><RomLab /></div>

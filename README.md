@@ -1,4 +1,4 @@
-# Moldforge
+# Game-Maker
 
 An original retro game studio by Lalo Adrian Morales. Describe a world in the six-step editor, generate game code and sprite artwork with OpenAI, and keep the result as a playable cartridge.
 
@@ -82,6 +82,8 @@ Format references: [iNES](https://www.nesdev.org/wiki/INES), [NES 2.0](https://w
 ## Gallery ownership
 
 Private games are associated with a random, HttpOnly, SameSite cookie. Only that browser can view, resume, publish, unpublish or delete them. Public games and their templates are readable by other visitors; only the creator can change them. Hearts and checkpoints are browser-local. There are **no user accounts or cross-device login** yet. Clearing the owner cookie loses private-library access: download cartridges you want to keep permanently.
+
+Game-Maker retains the legacy `.moldforge/` storage directory, browser storage keys, owner cookie and `MOLDFORGE_*` environment variables so existing installations keep their games, ROM projects, saves and settings. These internal identifiers are intentionally unchanged.
 
 Templates autosave locally. Games persist in SQLite outside the web document root, surviving app and PHP restarts. Back up `.moldforge/` using a SQLite-consistent backup; do not delete it during deployments. The gallery loads 30 entries at a time, with search over loaded entries and **Load more** for older games. Limits: 20 characters, 10 levels, 100 stored cartridges per browser, 30 new cartridges per browser per day.
 

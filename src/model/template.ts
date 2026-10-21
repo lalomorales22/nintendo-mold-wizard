@@ -17,7 +17,7 @@ export const DEFAULT_PARAMETERS: SharedParameters = {
 export function emptyTemplate(): GameTemplate {
   return {
     version: 1,
-    productName: 'Moldforge',
+    productName: 'Game-Maker',
     gameTitle: '',
     pitch: '',
     perspective: null,
