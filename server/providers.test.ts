@@ -88,17 +88,22 @@ describe('Claude credentials, contracts and saved identity',()=>{
     const body={prompt:'A penguin mail delivery game',provider:'anthropic',model:'claude-sonnet-5-5',reference:{label:'Tile page',image:tilePng}}
     expect(await (await call('plan',body,{anthropic:true})).json()).toEqual(plan)
     const data=records.at(-1)!.body
-    expect(data).toMatchObject({model:'claude-sonnet-5-5',max_tokens:5000,output_config:{format:{type:'json_schema'}}})
+    expect(data).toMatchObject({model:'claude-sonnet-5-5',max_tokens:10000,output_config:{effort:'medium',format:{type:'json_schema'}}})
     expect(JSON.stringify(data)).not.toContain('"minLength":');expect(JSON.stringify(data)).toContain('minLength: 1.')
     expect(data.messages).toEqual([{role:'user',content:[expect.objectContaining({type:'text'}),{type:'image',source:{type:'base64',media_type:'image/png',data:tilePng.slice(22)}}]}])
     invalidPlan=true;expect((await call('plan',body,{anthropic:true})).status).toBe(502);invalidPlan=false
+  })
+  it('leaves custom model effort and existing output limits alone',async()=>{
+    expect((await call('plan',{prompt:'A penguin mail delivery game',provider:'anthropic',model:'claude-custom'},{anthropic:true})).status).toBe(200)
+    expect(records.at(-1)!.body.max_tokens).toBe(5000)
+    expect(records.at(-1)!.body.output_config).not.toHaveProperty('effort')
   })
   it('pins Claude code/repair to its original model and routes art exclusively to OpenAI',async()=>{
     const g=await create('claude-art-build',true)
     expect(g.provider).toBe('anthropic');expect(g.codeModel).toBe('claude-opus-5-5')
     expect((await call('step',{id:g.id},{openai:true})).status).toBe(401)
     expect((await call('step',{id:g.id,provider:'openai',model:'gpt-changed'},{keys:true})).status).toBe(200)
-    expect(records.at(-1)).toMatchObject({url:'/v1/messages',body:{model:'claude-opus-5-5'}})
+    expect(records.at(-1)).toMatchObject({url:'/v1/messages',body:{model:'claude-opus-5-5',max_tokens:32000,output_config:{effort:'medium'}}})
     expect((await accept(g.id)).state).toBe('code')
     expect((await call('step',{id:g.id},{anthropic:true})).status).toBe(401)
     expect((await call('step',{id:g.id},{keys:true})).status).toBe(403)
@@ -107,21 +112,46 @@ describe('Claude credentials, contracts and saved identity',()=>{
     const saved=await (await call('get',undefined,{id:g.id})).json();expect(saved.game.state).toBe('code')
     await call('step',{id:g.id,skipArt:true});expect((await accept(g.id)).state).toBe('ready')
     expect((await call('repair',{id:g.id,provider:'openai',model:'gpt-changed'},{anthropic:true})).status).toBe(200)
-    expect(records.at(-1)).toMatchObject({url:'/v1/messages',body:{model:'claude-opus-5-5'}})
+    expect(records.at(-1)).toMatchObject({url:'/v1/messages',body:{model:'claude-opus-5-5',max_tokens:32000,output_config:{effort:'medium'}}})
     await accept(g.id)
     const html=await (await call('download',undefined,{id:g.id})).text();expect(html).toContain(code)
     expect(html).not.toContain(anthropicKey);expect(html).not.toContain(openaiKey)
   })
   it('keeps failed drafts recoverable and returns safe refusal, truncation and workspace errors',async()=>{
     const g=await create('claude-failures')
-    for(const reason of ['max_tokens','refusal']){
+    for(const reason of ['max_tokens','refusal','model_context_window_exceeded',`unexpected ${anthropicKey}`]){
+      const before=records.length
       stopReason=reason;const r=await call('step',{id:g.id},{anthropic:true});expect(r.status).toBe(reason==='refusal'?422:502)
-      expect((await (await call('get',undefined,{id:g.id})).json()).game.state).toBe('draft')
+      const message=await r.text();expect(message).toContain('Claude');expect(message).not.toContain(anthropicKey)
+      if(reason==='max_tokens'){expect(message).toContain('32,000-token response limit');expect(message).toContain('thinking')}
+      if(reason==='model_context_window_exceeded')expect(message).toContain('context space')
+      const saved=(await (await call('get',undefined,{id:g.id})).json()).game
+      expect(saved.state).toBe('draft');expect(saved.error).not.toContain(anthropicKey)
+      expect((await call('play',undefined,{id:g.id})).status).toBe(409)
+      expect(records.length-before).toBe(1) // No hidden retries, even when truncated JSON is parseable.
     }
     stopReason='end_turn';rejection=400
     const r=await call('step',{id:g.id},{anthropic:true});const message=await r.text()
     expect(message).toContain('workspace ID');expect(message).not.toContain(anthropicKey);rejection=0
     expect((await call('step',{id:g.id},{anthropic:true})).status).toBe(200);expect((await accept(g.id)).state).toBe('ready')
+  })
+  it('identifies a truncated plan and preserves a working cartridge if repair truncates',async()=>{
+    stopReason='max_tokens'
+    try {
+      const before=records.length
+      const r=await call('plan',{prompt:'A penguin mail delivery game',provider:'anthropic',model:'claude-sonnet-5-5'},{anthropic:true})
+      expect(r.status).toBe(502);expect(await r.text()).toContain('10,000-token response limit before finishing the plan')
+      expect(records.length-before).toBe(1)
+    } finally { stopReason='end_turn' }
+    const g=await create('claude-preserved-repair');await call('step',{id:g.id},{anthropic:true});const ready=await accept(g.id)
+    const html=await (await call('download',undefined,{id:g.id})).text()
+    stopReason='max_tokens'
+    try {
+      expect((await call('repair',{id:g.id},{anthropic:true})).status).toBe(502)
+      const saved=(await (await call('get',undefined,{id:g.id})).json()).game
+      expect(saved.state).toBe('ready');expect(saved.buildHash).toBe(ready.buildHash)
+      expect(await (await call('download',undefined,{id:g.id})).text()).toBe(html)
+    } finally { stopReason='end_turn' }
   })
   it('persists a private match with pinned selections, one cartridge per provider and a saved verdict',async()=>{
     const request={prompt:'A penguin mail delivery battle',requestId:'match-fixture',openaiModel:'gpt-6-sol',anthropicModel:'claude-haiku-5-5',withArt:false}

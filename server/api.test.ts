@@ -88,7 +88,7 @@ beforeAll(async () => {
       if(Array.isArray(data.input)) expect(data.input[0].content[1]).toMatchObject({type:'input_image',image_url:tilePng})
       if (codeMode === 'quota') { res.statusCode = 429; res.end(JSON.stringify({ error: { code: 'insufficient_quota', message: key } })); return }
       const payload = codeMode === 'invalid' ? {} : { summary: 'Generated playable test game', instructions: 'Arrows move.', artPrompt: 'Original pixel atlas', code: codeOverride || generatedCode }
-      res.end(JSON.stringify({ status: codeMode === 'incomplete' ? 'incomplete' : 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }] }))
+      res.end(JSON.stringify({ status: codeMode === 'incomplete' ? 'incomplete' : 'completed', incomplete_details: codeMode === 'incomplete' ? {reason:'max_output_tokens'} : null, output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }] }))
     } else if (req.url === '/v1/images/generations') {
       imageCalls++; expect(data.model).toBe('gpt-image-1.5'); expect(data.output_format).toBe('png'); expect(data.prompt).toContain('8 columns by 8 rows'); expect(data.background).toBe('transparent'); expect(data.size).toBe('1024x1024'); expect(data.quality).toBe('medium')
       if (imageRejection) { res.statusCode=imageRejection.status; res.end(JSON.stringify({ error: { message: key, param: imageRejection.param, code: imageRejection.code } })) }
@@ -183,6 +183,7 @@ describe('PHP game pipeline', () => {
       codeMode=mode
       const g=await (await call('create',{template:exampleTemplate(),requestId:`failure-${mode}`,withArt:false},{key})).json()
       const r=await call('step',{id:g.id},{key}); expect(r.ok).toBe(false)
+      if(mode==='incomplete')expect(await r.text()).toContain('OpenAI reached the 16,000-token response limit')
       expect((await (await call('get',undefined,{id:g.id})).json()).game.state).toBe('draft')
       expect((await call('play',undefined,{id:g.id})).status).toBe(409)
     }
