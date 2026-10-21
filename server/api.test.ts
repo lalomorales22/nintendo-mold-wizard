@@ -4,16 +4,19 @@ import { createServer, type Server } from 'node:http'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { Script } from 'node:vm'
+import { createContext, Script } from 'node:vm'
 import { exampleTemplate } from '../src/model/template'
 import type { ApiConfig, Cartridge } from '../src/model/types'
 
 let php: ChildProcess, fixture: Server, port: number, directory: string, base: string
 let cookie = '', csrf = '', codeCalls = 0, imageCalls = 0, imageFailure = false
+let planMode = 'valid'
+let codeOverride = ''
 let codeMode = 'valid', gameId = '', demoHtml = ''
 const key = 'sk-fixture-not-a-real-key-1234567890'
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5qkAAAAASUVORK5CYII='
-const generatedCode = 'function createGame(api){let score=0;return {update(dt){score+=dt;api.report({score,level:1,won:false})},render(ctx){ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)},save(){return {score}},load(d){if(Number.isFinite(d.score))score=d.score}}}'
+const tilePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAABACAYAAAD1Xam+AAAA4UlEQVR4nO3UIQEAIBDAwM9ECELQvwfEQOzE+anN2ucCTfM7APjHACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDsAYi+Rs0dAR0HAAAAAElFTkSuQmCC'
+const generatedCode = 'function createGame(api){let score=0;return {update(dt){score+=dt;api.report({score,level:1,won:false})},render(ctx){ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)},save(){return {score}},load(d){if(d&&Number.isFinite(d.score))score=d.score}}}'
 type TestResponse = Omit<Response, 'json'> & { json(): Promise<ApiConfig & Cartridge & { game: Cartridge; games: Cartridge[] }> }
 async function call(action: string, body?: object, opts: { id?: string; key?: string; cookie?: string; csrf?: string } = {}) {
   return fetch(`${base}?action=${action}${opts.id ? `&id=${opts.id}` : ''}`, {
@@ -45,9 +48,17 @@ beforeAll(async () => {
       codeCalls++
       expect(data.store).toBe(false)
       expect(data.text.format.type).toBe('json_schema')
-      expect(JSON.parse(data.input).gameTitle).toBe('Charge Quest')
+      expect(data.model).toBe('gpt-6-sol')
+      if (data.text.format.name === 'game_plan') {
+        expect(data.input[0].content[0].type).toBe('input_text')
+        if(data.input[0].content.length>1) expect(data.input[0].content[1]).toMatchObject({type:'input_image',image_url:tilePng})
+        res.end(JSON.stringify({ status:'completed', output:[{content:[{type:'output_text',text:JSON.stringify(planMode==='valid'?planFixture:{...planFixture,levels:[],perspective:'made-up'})}]}] })); return
+      }
+      const input = JSON.parse(typeof data.input === 'string' ? data.input : data.input[0].content[0].text)
+      expect((input.template || input).gameTitle).toBe('Charge Quest')
+      if(Array.isArray(data.input)) expect(data.input[0].content[1]).toMatchObject({type:'input_image',image_url:tilePng})
       if (codeMode === 'quota') { res.statusCode = 429; res.end(JSON.stringify({ error: { code: 'insufficient_quota', message: key } })); return }
-      const payload = codeMode === 'invalid' ? {} : { summary: 'Generated playable test game', instructions: 'Arrows move.', artPrompt: 'Original pixel atlas', code: generatedCode }
+      const payload = codeMode === 'invalid' ? {} : { summary: 'Generated playable test game', instructions: 'Arrows move.', artPrompt: 'Original pixel atlas', code: codeOverride || generatedCode }
       res.end(JSON.stringify({ status: codeMode === 'incomplete' ? 'incomplete' : 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }] }))
     } else if (req.url === '/v1/images/generations') {
       imageCalls++; expect(data.output_format).toBe('png'); expect(data.prompt).toContain('3 columns by 2 rows')
@@ -63,6 +74,13 @@ beforeAll(async () => {
   const config=await fetch(`${base}?action=config`); cookie=config.headers.get('set-cookie')!.split(';')[0]; csrf=(await config.json() as ApiConfig).csrf
 })
 afterAll(async () => { await stopPhp(); await new Promise<void>(r => fixture?.close(() => r())); if (directory) await rm(directory, { recursive: true, force: true }) })
+
+
+const planFixture = { title: 'Ice Ring', pitch: 'A penguin boxing adventure.', perspective: 'fighting', coreLoop: 'Block, punch and win each round.', visualStyle: 'Chunky icy silhouettes.', observations: 'No tile image supplied.', assumptions: 'Three rounds are proposed.', hero: { name:'Pip',description:'Penguin boxer',ability:'Punch',abilityDescription:'Z launches a short punch.' }, enemy:{name:'Rival',description:'A slow heavy opponent'},levels:[{name:'Ice rink',layout:'Flat arena with two fighters.',goal:'Win the round'}],win:'Win every round',lose:'Lose all lives' }
+async function accept(id: string) {
+  const g=(await (await call('get',undefined,{id})).json()).game
+  return (await call('validate',{id,buildHash:g.buildHash,passed:true})).json()
+}
 
 describe('PHP game pipeline', () => {
   it('requires a key, valid data, a same-browser CSRF token and correct HTTP methods', async () => {
@@ -99,11 +117,13 @@ describe('PHP game pipeline', () => {
     const g=await (await call('create',req,{key})).json() as Cartridge; gameId=g.id
     const duplicate=await (await call('create',req,{key})).json() as Cartridge
     expect(duplicate.id).toBe(gameId)
-    expect((await (await call('step',{id:gameId},{key})).json()).state).toBe('code')
+    expect((await (await call('step',{id:gameId},{key})).json()).state).toBe('testing')
+    expect((await accept(gameId)).state).toBe('code')
     imageFailure=true
     const failure=await call('step',{id:gameId},{key}); expect(failure.status).toBe(403); expect(await failure.text()).not.toContain(key)
     imageFailure=false
-    expect((await (await call('step',{id:gameId},{key})).json()).state).toBe('ready')
+    expect((await (await call('step',{id:gameId},{key})).json()).state).toBe('testing')
+    expect((await accept(gameId)).state).toBe('ready')
     await call('step',{id:gameId},{key})
     expect(codeCalls).toBe(1); expect(imageCalls).toBe(2)
     const html=await (await call('play',undefined,{id:gameId})).text()
@@ -139,9 +159,9 @@ describe('PHP game pipeline', () => {
   })
   it('can explicitly finish an existing coded cartridge without buying artwork', async () => {
     const g=await (await call('create',{template:exampleTemplate(),requestId:'skip-art-test',withArt:true},{key})).json()
-    await call('step',{id:g.id},{key});const calls=imageCalls
+    await call('step',{id:g.id},{key});await accept(g.id);const calls=imageCalls
     const result=await (await call('step',{id:g.id,skipArt:true})).json()
-    expect(result.state).toBe('ready');expect(result.hasArt).toBe(false);expect(imageCalls).toBe(calls)
+    expect(result.state).toBe('testing');expect((await accept(g.id)).state).toBe('ready');expect(result.hasArt).toBe(false);expect(imageCalls).toBe(calls)
   })
 })
 
@@ -168,5 +188,80 @@ describe('actual starter gameplay', () => {
     const {game,keys,edges,tick}=runtime();game.load({level:0,score:0,lives:1,screen:'play',x:50,coins:[]});tick(150);keys.add('ArrowRight');tick(600)
     expect(game.save().screen).toBe('lose');edges.add('Enter');tick(1);expect(game.save().lives).toBe(3)
     const original=game.save();game.load({level:-100,score:NaN,lives:99});expect(game.save()).toEqual(original)
+  })
+})
+
+
+describe('runtime gate and AI plan API', () => {
+  it('does not expose unfinished code, rejects stale results and retains errors for repair', async () => {
+    const g=await (await call('create',{template:exampleTemplate(),requestId:'runtime-failure',withArt:false},{key})).json()
+    const coded=await (await call('step',{id:g.id},{key})).json()
+    expect(coded.state).toBe('testing')
+    expect((await call('play',undefined,{id:g.id})).status).toBe(409)
+    expect((await call('publish',{id:g.id,published:true})).status).toBe(400)
+    expect((await call('validate',{id:g.id,buildHash:'wrong',passed:true})).status).toBe(409)
+    expect((await call('validate',{id:g.id,buildHash:coded.buildHash,passed:false,error:'Missing render'})).status).toBe(422)
+    expect((await (await call('get',undefined,{id:g.id})).json()).game.error).toBe('Missing render')
+    expect((await call('repair',{id:g.id})).status).toBe(401)
+    expect((await (await call('repair',{id:g.id},{key})).json()).state).toBe('testing')
+    expect((await accept(g.id)).state).toBe('ready')
+  })
+  it('plans from a description, validates requests and rejects arbitrary image URLs', async () => {
+    expect((await call('plan',{prompt:'A penguin boxing game'})).status).toBe(401)
+    expect((await call('plan',{prompt:'tiny'},{key})).status).toBe(400)
+    expect((await call('plan',{prompt:'A penguin boxing game',reference:{label:'tiles',image:'https://example.com/private'}},{key})).status).toBe(400)
+    const result=await call('plan',{prompt:'A penguin boxing game'},{key})
+    expect(result.status).toBe(200);expect(await result.json()).toEqual(planFixture)
+    planMode='invalid'
+    expect((await call('plan',{prompt:'A penguin boxing game'},{key})).status).toBe(502)
+    planMode='valid'
+  })
+  it('retains selected tiles in the template, vision input and downloadable game', async () => {
+    const reference={label:'NES preview at $004010',image:tilePng}
+    expect((await call('plan',{prompt:'Use these tiles for a new adventure',reference},{key})).status).toBe(200)
+    const template={...exampleTemplate(),referenceTiles:reference}
+    const g=await (await call('create',{template,requestId:'tile-reference-test',withArt:false},{key})).json()
+    await call('step',{id:g.id},{key});await accept(g.id)
+    const html=await (await call('download',undefined,{id:g.id})).text()
+    expect(JSON.parse(html.match(/const CONFIG=(.+);/)![1]).template.referenceTiles).toEqual(reference)
+    expect(html).toContain('tile(c,index,x,y,w,h)')
+    expect(html).not.toContain(key)
+  })
+  async function runProbe(code: string, perspective = 'first-person', withArt = false) {
+    codeOverride=code
+    const template={...exampleTemplate(),perspective}
+    const g=await (await call('create',{template,requestId:crypto.randomUUID(),withArt},{key})).json()
+    await call('step',{id:g.id},{key});codeOverride=''
+    if(withArt){await accept(g.id);await call('step',{id:g.id},{key})}
+    const html=await (await call('probe',undefined,{id:g.id})).text()
+    const messages:{type:string;message?:string}[]=[]
+    const element={style:{},textContent:'',getContext:()=>ctx,addEventListener:()=>{},focus:()=>{}}
+    const ctx={fillRect:()=>{},save:()=>{},restore:()=>{},drawImage:()=>{}}
+    class TestImage { width=1536; height=1024; async decode(){} }
+    const listeners:Record<string,(e:{message:string})=>void>={}
+    const context=createContext({document:{querySelector:()=>element,getElementById:()=>element,querySelectorAll:()=>[],addEventListener:()=>{}},parent:{postMessage:(v:{type:string;message?:string})=>messages.push(v)},window:{addEventListener:(name:string,fn:(e:{message:string})=>void)=>{listeners[name]=fn}},console,Set,Image:TestImage})
+    for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+      try { await new Script(script).runInContext(context,{timeout:1000}) }
+      catch(e) { listeners.error?.({message:(e as Error).message}) }
+    }
+    return messages
+  }
+  it('exercises the actual sandbox probe across every supported perspective', async () => {
+    for(const perspective of ['top-down','side-view','first-person','isometric','rail-shooter','fighting','platformer-2d','3d-adventure']) {
+      const messages=await runProbe(generatedCode,perspective)
+      expect(messages.at(-1),JSON.stringify(messages)).toMatchObject({type:'moldforge-tested'})
+    }
+  })
+  it('tests both drawn fallbacks and loaded sprite artwork', async () => {
+    expect((await runProbe(generatedCode,'platformer-2d',true)).at(-1)?.type).toBe('moldforge-tested')
+  })
+  it('catches syntax, missing methods, input-path failures and checkpoint failures', async () => {
+    const broken=[generatedCode.slice(0,-1),generatedCode.replace('render(ctx)','draw(ctx)'),generatedCode.replace('score+=dt','if(api.keys.has("ArrowRight"))missingHelper();score+=dt'),generatedCode.replace('if(d&&Number.isFinite(d.score))','if(Number.isFinite(d.score))'),generatedCode.replace('ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)',''),generatedCode.replace('ctx.fillRect(0,0,768,432)','ctx.fillRect(NaN,0,768,432)')]
+    for(const code of broken) {
+      const result=await runProbe(code)
+      expect(result.some(m=>m.type==='moldforge-tested')).toBe(false)
+      expect(result[0]?.type).toBe('moldforge-error')
+      expect(result[0]?.message).not.toBe('createGame is not defined')
+    }
   })
 })

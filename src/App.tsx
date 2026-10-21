@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import { createGame, generateStep, getConfig, getGame } from './api/generate'
+import { validateGame, repairGame } from './api/validate'
 import { Create } from './components/Create'
 import { ApiKeyRequiredError, runGeneration } from './model/generation'
 import { Gallery } from './components/Gallery'
@@ -44,7 +45,7 @@ export default function App() {
   const refresh = () => setRevision(v => v + 1)
   const remix = (template: GameTemplate) => {
     if (busy) { setError('Wait for generation to finish before changing the current template.'); return }
-    if (state.template.gameTitle && !confirm('Load this cartridge’s template into the editor? This replaces your current draft; saved cartridges stay on the shelf.')) return
+    if (state.template.gameTitle && !confirm('Load this game plan into the editor? This replaces your current draft; saved cartridges stay on the shelf.')) return
     dispatch({ type: 'load', state: { template, step: 'review', maxReached: 5, job: null } }); setPage('studio')
   }
   const startNewGame = () => {
@@ -54,14 +55,14 @@ export default function App() {
     dispatch({ type: 'reset' }); setPlaying(null); setError(null); setGenerationMessage(''); setWithArt(true); setPage('studio')
     window.scrollTo({ top: 0, behavior: 'instant' })
   }
-  const generate = async (starter = false, resumeId?: string, skipArt = false) => {
+  const generate = async (starter = false, resumeId?: string, skipArt = false, repair: string | boolean = false) => {
     if (inFlight.current) return
     inFlight.current = true; setBusy(true); setError(null); setPlaying(null)
     // A failed new request must never leave an older Play button behind.
     if (!resumeId) dispatch({ type: 'setJob', job: null })
     try {
-      const game = await runGeneration({ template: structuredClone(state.template), apiKey, withArt, starter, resumeId, skipArt },
-        { getConfig, getGame, createGame, generateStep },
+      const game = await runGeneration({ template: structuredClone(state.template), apiKey, withArt, starter, resumeId, skipArt, repair },
+        { getConfig, getGame, createGame, generateStep, validateGame, repairGame },
         { onConfig: setConfig, onMessage: setGenerationMessage, onJob: job => dispatch({ type: 'setJob', job }) })
       refresh(); setPage('gallery'); setPlaying(game)
     } catch (e) {
@@ -85,7 +86,8 @@ export default function App() {
         <main className="workspace"><Settings />{error && <div className="error-banner" role="alert"><p>{error}</p><button onClick={() => setError(null)} aria-label="Dismiss error">✕</button></div>}
           {busy && <div className="generation-notice" role="status" aria-live="polite">✦ {generationMessage}</div>}
           <div hidden={page !== 'rom'}><RomLab /></div>
-          {page === 'rom' ? null : page === 'create' ? <Create state={state} startNew={startNewGame} continueDraft={() => setPage('studio')} openRoms={() => setPage('rom')} /> : page === 'gallery' ? <Gallery /> : <fieldset disabled={busy} className="min-w-0"><View state={state} dispatch={dispatch} /></fieldset>}
+          <div hidden={page !== 'create'}><Create state={state} startNew={startNewGame} continueDraft={() => setPage('studio')} openRoms={() => setPage('rom')} /></div>
+          {page === 'rom' || page === 'create' ? null : page === 'gallery' ? <Gallery /> : <fieldset disabled={busy} className="min-w-0"><View state={state} dispatch={dispatch} /></fieldset>}
         </main>
         {page === 'studio' && <footer className="wizard-footer"><button className="btn-ghost" disabled={idx === 0 || busy} onClick={() => dispatch({ type: 'back' })}>← Back</button><div className="footer-progress"><span>{blocked && !isLast ? blocked : '✓ Draft saved in this browser'}</span><div><i style={{ width: `${progress(state)}%` }} /></div></div>{!isLast ? <button className="btn-primary" disabled={!!blocked || busy} onClick={() => dispatch({ type: 'next' })}>Continue →</button> : <span className="text-xs text-zinc-500">06 / 06</span>}</footer>}
       </div>

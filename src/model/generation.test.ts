@@ -9,6 +9,16 @@ function setup(hasKey = true) {
   const cartridges = new Map<string, { game: Cartridge; template: GameTemplate }>()
   const config: ApiConfig = { csrf: 'test-token', serverKeyAvailable: hasKey, codeModel: 'fixture', imageModel: 'fixture' }
   const service = {
+    validateGame: vi.fn(async (id: string): Promise<Cartridge> => {
+      const saved = cartridges.get(id)!
+      saved.game.state = saved.game.withArt && !saved.game.hasArt ? 'code' : 'ready'
+      return structuredClone(saved.game)
+    }),
+    repairGame: vi.fn(async (id: string): Promise<Cartridge> => {
+      const saved = cartridges.get(id)!
+      saved.game.state = 'testing'
+      return structuredClone(saved.game)
+    }),
     getConfig: vi.fn(async () => config),
     getGame: vi.fn(async (id: string) => structuredClone(cartridges.get(id)!)),
     createGame: vi.fn(async (template: GameTemplate, withArt: boolean, _requestId: string, _csrf: string, _key: string, starter = false): Promise<Cartridge> => {
@@ -20,8 +30,9 @@ function setup(hasKey = true) {
     }),
     generateStep: vi.fn(async (id: string, _csrf: string, _key: string, skipArt = false): Promise<Cartridge> => {
       const saved = cartridges.get(id)!
-      saved.game.state = saved.game.state === 'draft' && saved.game.withArt ? 'code' : 'ready'
-      saved.game.hasArt = saved.game.state === 'ready' && saved.game.withArt && !skipArt
+      saved.game.hasArt = saved.game.state === 'code' && !skipArt
+      if (skipArt) saved.game.withArt = false
+      saved.game.state = 'testing'
       return structuredClone(saved.game)
     }),
   }
@@ -82,5 +93,32 @@ describe('generation and regeneration', () => {
     await expect(runGeneration({ template: exampleTemplate(), withArt: false, apiKey: '' }, service, events)).rejects.toThrow('PHP server unavailable')
     expect(jobs).toEqual([])
     expect(service.createGame).not.toHaveBeenCalled()
+  })
+})
+
+describe('runtime acceptance gate', () => {
+  it('holds failed games for testing and never buys art or silently repairs them', async () => {
+    const { service, events, jobs } = setup()
+    service.validateGame.mockRejectedValueOnce(new Error('Missing render'))
+    await expect(runGeneration({ template: exampleTemplate(), withArt: true, apiKey: '' }, service, events)).rejects.toThrow('Missing render')
+    expect(service.generateStep).toHaveBeenCalledTimes(1)
+    expect(service.repairGame).not.toHaveBeenCalled()
+    expect(jobs.at(-1)?.status).toBe('failed')
+    expect(jobs.at(-1)?.result).toBeUndefined()
+  })
+  it('checks code before art and checks again with art', async () => {
+    const { service, events } = setup()
+    await runGeneration({ template: exampleTemplate(), withArt: true, apiKey: '' }, service, events)
+    expect(service.validateGame).toHaveBeenCalledTimes(2)
+    expect(service.validateGame.mock.invocationCallOrder[0]).toBeLessThan(service.generateStep.mock.invocationCallOrder[1])
+  })
+  it('repairs only after explicit request, then tests the same cartridge', async () => {
+    const { service, events } = setup()
+    const game = await runGeneration({ template: exampleTemplate(), withArt: false, apiKey: '' }, service, events)
+    const repaired = await runGeneration({ template: exampleTemplate(), withArt: false, apiKey: '', resumeId: game.id, repair: 'Missing helper' }, service, events)
+    expect(repaired.id).toBe(game.id)
+    expect(service.repairGame).toHaveBeenCalledWith(game.id, 'test-token', '', 'Missing helper')
+    expect(service.validateGame).toHaveBeenCalledTimes(2)
+    expect(service.createGame).toHaveBeenCalledTimes(1)
   })
 })

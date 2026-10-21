@@ -15,8 +15,11 @@ interface GenerationRequest {
   starter?: boolean
   resumeId?: string
   skipArt?: boolean
+  repair?: string | boolean
 }
 interface GenerationService {
+  validateGame: (id: string, csrf: string) => Promise<Cartridge>
+  repairGame: (id: string, csrf: string, key: string, error?: string) => Promise<Cartridge>
   getConfig: () => Promise<ApiConfig>
   getGame: (id: string) => Promise<{ game: Cartridge; template: GameTemplate }>
   createGame: (template: GameTemplate, withArt: boolean, requestId: string, csrf: string, key: string, starter?: boolean) => Promise<Cartridge>
@@ -48,15 +51,25 @@ export async function runGeneration(request: GenerationRequest, service: Generat
       const saved = await service.getGame(request.resumeId)
       current = saved.game
       sourceKey = templateKey(saved.template)
+      if (request.repair) {
+        if (!request.apiKey.trim() && !config.serverKeyAvailable) throw new ApiKeyRequiredError()
+        update('building-levels', 25, 'OpenAI is repairing the saved game. Its previous code will be kept…')
+        current = await service.repairGame(current.id, config.csrf, request.apiKey, typeof request.repair === 'string' ? request.repair : undefined)
+      }
       if (current.state === 'ready') { update('done', 100, 'Saved cartridge is ready to play.'); return current }
     }
-    if (!request.starter && !request.skipArt && !request.apiKey.trim() && !config.serverKeyAvailable) throw new ApiKeyRequiredError()
+    if (current?.state !== 'testing' && !request.starter && !request.skipArt && !request.apiKey.trim() && !config.serverKeyAvailable) throw new ApiKeyRequiredError()
     if (!current) {
       events.onMessage('Saving a new cartridge for this template…')
       current = await service.createGame(request.template, request.withArt, crypto.randomUUID(), config.csrf, request.apiKey, request.starter)
     }
     if (current.state !== 'ready') update('queued', 10, `Draft saved for “${current.title}”.`)
     while (current.state !== 'ready') {
+      if (current.state === 'testing') {
+        update('packaging', 85, 'Checking startup, controls, rendering, checkpoints and restart…')
+        current = await service.validateGame(current.id, config.csrf)
+        continue
+      }
       update(current.state === 'draft' ? 'building-levels' : 'generating-assets', current.state === 'draft' ? 25 : 75,
         current.state === 'draft' ? 'OpenAI is writing your game code, mechanics and levels…' : request.skipArt ? 'Packaging with drawn game artwork…' : 'Code saved. OpenAI is drawing your sprite atlas…')
       current = await service.generateStep(current.id, config.csrf, request.apiKey, request.skipArt)

@@ -16,7 +16,7 @@ export interface Studio {
   setError: (error: string | null) => void
   revision: number
   refresh: () => void
-  generate: (starter?: boolean, resumeId?: string, skipArt?: boolean) => Promise<void>
+  generate: (starter?: boolean, resumeId?: string, skipArt?: boolean, repair?: string | boolean) => Promise<void>
   play: (game: Cartridge) => void
   remix: (template: GameTemplate) => void
   showGallery: () => void

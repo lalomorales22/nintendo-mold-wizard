@@ -1,3 +1,4 @@
+import { AiPlanner } from './AiPlanner'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { analyzeRom, changedBytes, createIps, decodeTile, hex, MAX_ROM_SIZE, paintPixel, parseHex, repairSnesChecksum, setSnesTitle, tileBits, tileBytes, type TileFormat } from '../rom/format'
 import { getRom, listRoms, saveRom, summarizeRom, type RomProject, type RomSummary } from '../rom/storage'
@@ -32,7 +33,7 @@ function TileSheet({ bytes, offset, format, count, selected, choose }: { bytes: 
 export function RomLab() {
   const [projects, setProjects] = useState<RomSummary[]>([])
   const [project, setProject] = useState<RomProject | null>(null)
-  const [tab, setTab] = useState<'overview' | 'tiles' | 'bytes'>('overview')
+  const [tab, setTab] = useState<'overview' | 'tiles' | 'bytes' | 'ai'>('overview')
   const [error, setError] = useState(''), [notice, setNotice] = useState('')
   const [saveStatus, setSaveStatus] = useState(''), [loading, setLoading] = useState(false)
   const [history, setHistory] = useState<Edit[][]>([]), [redo, setRedo] = useState<Edit[][]>([])
@@ -118,12 +119,22 @@ export function RomLab() {
   const pixels = project && tileCount && selectedTile < tileCount ? decodeTile(project.modified, tileAddress, format) : []
   const chooseOffset = (value: number) => { setOffset(value); setOffsetText(hex(value)); setSelectedTile(0) }
   const jumpTo = (value: number) => { setBytePage(Math.floor(value / 256) * 256); setByteOffset(value); setByteValue(hex(project!.modified[value], 2)); setJump(hex(value)) }
+  const reference = useMemo(() => {
+    if (!project || !tileCount || originalInfo?.system === 'NES' && !originalInfo.chr) return undefined
+    const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 64
+    const ctx = canvas.getContext('2d')!
+    ctx.fillStyle = COLORS[0]; ctx.fillRect(0, 0, 256, 64)
+    for (let tile = 0; tile < tileCount; tile++) decodeTile(project.modified, offset + tile * tileBytes(format), format).forEach((pixel, i) => {
+      ctx.fillStyle = previewColor(pixel); ctx.fillRect((tile % 16 * 8 + i % 8) * 2, (Math.floor(tile / 16) * 8 + (i >> 3)) * 2, 2, 2)
+    })
+    return { image: canvas.toDataURL('image/png'), label: `${originalInfo?.system} · ${format} · file offset $${hex(offset)} · ${tileCount} tiles · preview palette` }
+  }, [project, tileCount, originalInfo, offset, format])
   const stem = project?.name.replace(/\.[^.]+$/, '') ?? 'cartridge'
 
   return <section className="rom-lab">
     <div className="rom-heading"><div><p className="eyebrow">CARTRIDGE WORKSHOP / NES + SUPER NES</p><h1 className="page-title">Open the cart.<br /><span>Make it yours.</span></h1><p className="hero-copy">Bring in a game you made. Inspect its structure, redraw its tiles,<br />and export a new version for your console or emulator.</p></div><div className="rom-chip" aria-hidden="true"><span>ROM</span><b>8 / 16</b><small>BIT WORKSHOP</small></div></div>
     <div className="rom-import" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); void importFile(e.dataTransfer.files[0]) }}>
-      <div><strong>INSERT YOUR CARTRIDGE</strong><p>Drop a .nes, .snes, .sfc or .smc file · up to 8 MiB + header</p><small>Files stay on this device. No API key needed.</small></div>
+      <div><strong>INSERT YOUR CARTRIDGE</strong><p>Drop a .nes, .snes, .sfc or .smc file · up to 8 MiB + header</p><small>ROM editing stays on this device. AI planning is optional.</small></div>
       <button className="btn-primary" disabled={loading} onClick={() => input.current?.click()}>{loading ? 'Reading cartridge…' : '↑ Import ROM'}</button>
       <input ref={input} type="file" accept=".nes,.snes,.sfc,.smc" aria-label="Import NES or SNES ROM" className="sr-only" onChange={e => void importFile(e.target.files?.[0])} />
     </div>
@@ -133,8 +144,9 @@ export function RomLab() {
       <header className="rom-toolbar"><div><p className="eyebrow">{info.system} / {info.format}</p><h2>{project.name}</h2><p role="status">{saveStatus} · {changes.toLocaleString()} changed bytes</p></div><div className="rom-actions"><button className="btn-ghost" disabled={!history.length} onClick={() => undoEdit()}>↶ Undo</button><button className="btn-ghost" disabled={!redo.length} onClick={() => undoEdit(true)}>↷ Redo</button><button className="btn-ghost" onClick={() => download(project.original, project.name)}>↓ Original</button><button className="btn-ghost" onClick={() => safely(() => download(createIps(project.original, project.modified), `${stem}.ips`))}>↓ IPS patch</button><button className="btn-primary" onClick={() => { download(project.modified, project.name.replace(/(\.[^.]+)$/, '-edited$1')); exported.current = project }}>↓ Edited ROM</button></div></header>
       {notice && <p className="rom-save-note" role="status">{notice}</p>}
       {analysis.error && <div className="error-banner">Edited header is not recognized: {analysis.error} The map below uses the original header. Undo the header edit to restore detection.</div>}
-      <div className="rom-tabs" role="tablist" aria-label="ROM tools">{(['overview', 'tiles', 'bytes'] as const).map(t => <button role="tab" id={`rom-tab-${t}`} aria-controls={`rom-panel-${t}`} aria-selected={tab === t} key={t} onClick={() => setTab(t)}>{t === 'overview' ? '01 / Cartridge map' : t === 'tiles' ? '02 / Tile editor' : '03 / Hex editor'}</button>)}</div>
+      <div className="rom-tabs" role="tablist" aria-label="ROM tools">{(['overview', 'tiles', 'bytes', 'ai'] as const).map(t => <button role="tab" id={`rom-tab-${t}`} aria-controls={`rom-panel-${t}`} aria-selected={tab === t} key={t} onClick={() => setTab(t)}>{t === 'overview' ? '01 / Cartridge map' : t === 'tiles' ? '02 / Tile editor' : t === 'bytes' ? '03 / Hex editor' : '04 / AI game plan'}</button>)}</div>
       <div role="tabpanel" id={`rom-panel-${tab}`} aria-labelledby={`rom-tab-${tab}`}>
+      <div hidden={tab !== 'ai'}><div className="rom-panel"><p className="rom-note">Choose a recognizable page in the Tile editor first, then describe the new game here. You can also plan from your description when tiles are unavailable.</p><AiPlanner reference={reference} sourceKey={`${project.id}:${project.savedAt}`} /></div></div>
       {tab === 'overview' && <div className="rom-panel"><div className="rom-stats"><div className="rom-stat"><small>FORMAT</small><strong>{info.format}</strong></div><div className="rom-stat"><small>MAPPING</small><strong>{info.mapping}</strong></div><div className="rom-stat"><small>FILE SIZE</small><strong>{(project.modified.length / 1024).toLocaleString()} KiB</strong></div><div className="rom-stat"><small>GRAPHICS</small><strong>{info.system === 'SNES' ? 'Locate in tile editor' : info.chr ? `${Math.floor(info.chr.size / 16)} CHR tiles` : 'CHR RAM'}</strong></div></div>
         <h3>Inside this cartridge</h3><div className="rom-section-list">{info.regions.map(r => <button key={r.name} onClick={() => { jumpTo(r.offset); setTab('bytes') }}><strong>{r.name}</strong><code>${hex(r.offset)} – ${hex(r.offset + r.size - 1)}</code><span>{r.size.toLocaleString()} bytes →</span></button>)}</div>
         {info.system === 'SNES' && <div className="rom-title-form"><label className="label" htmlFor="rom-title">Internal cartridge title (21 ASCII characters)</label><div className="rom-actions"><input className="input" id="rom-title" value={title} maxLength={21} onChange={e => setTitle(e.target.value)} /><button className="btn-ghost" onClick={() => safely(() => apply(setSnesTitle(project.modified, info, title), 'Cartridge title updated. Repair the checksum before export.'))}>Apply title</button><button className="btn-ghost" disabled={!info.canFixChecksum || !!analysis.error} onClick={() => safely(() => apply(repairSnesChecksum(project.modified, info), 'SNES checksum and complement repaired.'))}>Repair checksum</button></div><p className="rom-note">Stored checksum: ${hex(info.checksum!, 4)}. Editing any byte can change it; use Repair checksum before export. Repair is explicit and undoable.</p></div>}
@@ -154,6 +166,6 @@ export function RomLab() {
       </div>}
       </div>
     </div>}
-    <p className="rom-scope"><b>What this workshop can do:</b> inspect and edit cartridge bytes and uncompressed tiles. It does not recover source code, automatically rebuild level editors, or run an NES/SNES emulator. Export your ROM to test in your existing emulator. Local projects are separate from generated browser games; download a copy before clearing browser data. IPS patches require the exact original file, including its copier header.</p>
+    <p className="rom-scope"><b>What this workshop can do:</b> inspect and edit cartridge bytes and uncompressed tiles. It does not recover source code, automatically rebuild level editors, or run an NES/SNES emulator. Export your ROM to test in your existing emulator. AI game plans can use a decoded tile page as a visual reference for a new browser game. Local ROM projects stay separate from generated browser games; download a copy before clearing browser data. IPS patches require the exact original file, including its copier header.</p>
   </section>
 }

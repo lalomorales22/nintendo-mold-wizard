@@ -104,6 +104,7 @@ export interface SharedParameters {
 }
 
 export interface GameTemplate {
+  referenceTiles?: { image: string; label: string }
   version: 1
   productName: string
   gameTitle: string
@@ -133,7 +134,8 @@ export interface Cartridge {
   pitch: string
   perspective: PerspectiveId
   createdAt: string
-  state: 'draft' | 'code' | 'ready'
+  state: 'draft' | 'code' | 'testing' | 'ready'
+  buildHash?: string
   provider: 'openai' | 'starter'
   withArt: boolean
   hasArt: boolean

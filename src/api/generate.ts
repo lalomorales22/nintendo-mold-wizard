@@ -6,7 +6,7 @@ export const apiUrl = (action: string, id?: string) => `${endpoint}?${new URLSea
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response
   try { response = await fetch(url, { ...init, credentials: 'same-origin', signal: AbortSignal.timeout(225000) }) }
-  catch { throw new Error('The game server could not be reached. Your draft is saved. Check the connection and resume from your gallery.') }
+  catch { throw new Error('The game server could not be reached. Check the connection and try again. Existing cartridges remain in your gallery.') }
   let data: T & { error?: string }
   try { data = await response.json() }
   catch { throw new Error('The PHP game API is unavailable. Start with npm run dev, or enable PHP on your host.') }
