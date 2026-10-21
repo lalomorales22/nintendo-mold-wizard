@@ -148,7 +148,18 @@ function openai(string $endpoint, array $payload, string $key): array {
         if ($status === 429) fail($code === 'insufficient_quota' ? 'OpenAI billing quota is exhausted. Add API credit, then retry.' : 'OpenAI is rate limiting requests. Wait a moment, then retry.', 429);
         if ($status === 403) fail('Your OpenAI project does not have access to this model. Check model access or verification.', 403);
         if ($code === 'content_policy_violation') fail('OpenAI could not generate this content. Edit your game description and try again.', 422);
-        fail('OpenAI could not complete this step (HTTP ' . $status . '). Check model access and retry.', 502);
+        if ($status === 400 || $status === 404) {
+            // Never copy upstream messages: they can echo credentials or prompt text.
+            $param=$data['error']['param']??'';
+            $knownParams=['model','background','size','quality','output_format','prompt','n','max_output_tokens','text.format'];
+            $knownCodes=['invalid_value','invalid_parameter','unsupported_value','unsupported_parameter','unknown_parameter','model_not_found','invalid_request_error','string_above_max_length'];
+            $detail=in_array($param,$knownParams,true)?'; setting: '.$param:'';
+            if(in_array($code,$knownCodes,true))$detail.='; reason: '.$code;
+            $hint=$param==='background'?' The selected image model rejected the background option.':($param==='model'||$code==='model_not_found'?' Check the configured model and your project access.':'');
+            $sprites=$endpoint==='images/generations';
+            fail('OpenAI rejected the '.($sprites?'sprite':'generation').' request (HTTP '.$status.$detail.').'.$hint.($sprites?' Saved code is kept.':' Your saved work is kept.'),502);
+        }
+        fail('OpenAI could not complete this step (HTTP ' . $status . '). Your saved work is kept; retry this step later.', 502);
     }
     if (!is_array($data)) fail('OpenAI returned an unreadable response. Retry this step.', 502);
     return $data;
@@ -246,7 +257,7 @@ function generateArt(array $g, string $key): string {
     $layout = $animated ? 'EXACTLY 8 columns by 8 rows of 128x128 pixel cells on a 1024x1024 image. Coordinates below are zero-based. Hero block: columns 0-3, rows 0-3. Enemy block: columns 4-7, rows 0-3. Boss block: columns 0-3, rows 4-7. Each 4x4 character block contains four facing directions, one per row, in this exact order: DOWN (front), LEFT (left profile), RIGHT (right profile), UP (back). Each row contains four poses: column 0 neutral idle, column 1 left foot forward, column 2 passing pose, column 3 right foot forward. Same character, proportions, palette, scale and foot baseline in every frame. Feet at 85% cell height; entire body within the middle 75% of cell width and height. The poses must visibly differ while keeping a fixed anchor. Props: cell (4,4) collectible, cell (5,4) terrain tile, cell (6,4) decorative plant or rock. Remaining cells fully transparent and empty.'
         : 'EXACTLY 3 columns by 2 rows of equal cells on a 1536x1024 image. Top row: hero, enemy, collectible. Bottom row: terrain, scenery, boss. Center each subject in its cell.';
     $prompt = 'Draw an original '.$t['parameters']['artStyle'].' game sprite sheet for '.$t['gameTitle'].'. '.$layout.' No grid lines, borders, gutters, words, labels or text. Isolated sprites on a fully TRANSPARENT background with true alpha. No solid backdrop, checkerboard pattern, scenery behind characters, ground planes or cast shadows. Never paint navy rectangles. Each sprite will be cropped exactly at the cell boundary. Crisp silhouettes, no antialiased halos. Respect the grid and transparency above; the following brief supplies character designs only: '.substr($p['artPrompt'],0,5000);
-    $r = openai('images/generations', ['model'=>envValue('OPENAI_IMAGE_MODEL','gpt-image-2'), 'prompt'=>$prompt,
+    $r = openai('images/generations', ['model'=>envValue('OPENAI_IMAGE_MODEL','gpt-image-1.5'), 'prompt'=>$prompt,
         'n'=>1, 'size'=>$animated?'1024x1024':'1536x1024', 'quality'=>'medium', 'background'=>'transparent', 'output_format'=>'png'], $key);
     $image = $r['data'][0]['b64_json'] ?? '';
     if (!is_string($image) || strlen($image) > 16000000) fail('OpenAI returned an invalid image.', 502);
@@ -465,7 +476,7 @@ try {
     if ($action === 'config') {
         db(); // Surface storage errors before a paid request.
         respond(['csrf'=>$csrf,'serverKeyAvailable'=>serverKeyAllowed() && envValue('OPENAI_API_KEY') !== '',
-            'codeModel'=>envValue('OPENAI_CODE_MODEL','gpt-6-sol'),'imageModel'=>envValue('OPENAI_IMAGE_MODEL','gpt-image-2')]);
+            'codeModel'=>envValue('OPENAI_CODE_MODEL','gpt-6-sol'),'imageModel'=>envValue('OPENAI_IMAGE_MODEL','gpt-image-1.5')]);
     }
     if ($action === 'plan') respond(generatePlan($b));
     if ($action === 'list') {

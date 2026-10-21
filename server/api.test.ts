@@ -28,6 +28,7 @@ function sheetPng(opaque = false, width = 1024, height = 1024, empty = false) {
 }
 const png = sheetPng()
 let imageOverride = ''
+let imageRejection: { status: number; param: string; code: string } | null = null
 
 const tilePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAABACAYAAAD1Xam+AAAA4UlEQVR4nO3UIQEAIBDAwM9ECELQvwfEQOzE+anN2ucCTfM7APjHACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDsAYi+Rs0dAR0HAAAAAElFTkSuQmCC'
 const generatedCode = 'function createGame(api){let score=0;return {update(dt){score+=dt;api.report({score,level:1,won:false})},render(ctx){ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)},save(){return {score}},load(d){if(d&&Number.isFinite(d.score))score=d.score}}}'
@@ -40,8 +41,12 @@ async function call(action: string, body?: object, opts: { id?: string; key?: st
   }) as Promise<TestResponse>
 }
 async function startPhp() {
+  const testEnv = { ...process.env }
+  delete testEnv.OPENAI_CODE_MODEL
+  delete testEnv.OPENAI_IMAGE_MODEL
   php = spawn('php', ['-S', `127.0.0.1:${port}`, '-t', 'server', 'server/router.php'], { cwd: resolve('.'), stdio: 'ignore', env: {
-    ...process.env, MOLDFORGE_DATA_DIR: directory, MOLDFORGE_LOCAL: '0', ALLOW_SERVER_KEY: 'false', OPENAI_API_KEY: '',
+    ...testEnv, MOLDFORGE_DATA_DIR: directory, MOLDFORGE_LOCAL: '0', ALLOW_SERVER_KEY: 'false', OPENAI_API_KEY: '',
+    MOLDFORGE_ENV_FILE: join(directory, 'missing.env'),
     MOLDFORGE_TEST: '1', MOLDFORGE_TEST_API: `http://127.0.0.1:${(fixture.address() as { port: number }).port}/v1`,
   } })
   for (let i = 0; i < 70; i++) {
@@ -75,8 +80,9 @@ beforeAll(async () => {
       const payload = codeMode === 'invalid' ? {} : { summary: 'Generated playable test game', instructions: 'Arrows move.', artPrompt: 'Original pixel atlas', code: codeOverride || generatedCode }
       res.end(JSON.stringify({ status: codeMode === 'incomplete' ? 'incomplete' : 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }] }))
     } else if (req.url === '/v1/images/generations') {
-      imageCalls++; expect(data.output_format).toBe('png'); expect(data.prompt).toContain('8 columns by 8 rows'); expect(data.background).toBe('transparent'); expect(data.size).toBe('1024x1024'); expect(data.quality).toBe('medium')
-      if (imageFailure) { res.statusCode=403; res.end(JSON.stringify({ error: { message: key } })) }
+      imageCalls++; expect(data.model).toBe('gpt-image-1.5'); expect(data.output_format).toBe('png'); expect(data.prompt).toContain('8 columns by 8 rows'); expect(data.background).toBe('transparent'); expect(data.size).toBe('1024x1024'); expect(data.quality).toBe('medium')
+      if (imageRejection) { res.statusCode=imageRejection.status; res.end(JSON.stringify({ error: { message: key, param: imageRejection.param, code: imageRejection.code } })) }
+      else if (imageFailure) { res.statusCode=403; res.end(JSON.stringify({ error: { message: key } })) }
       else res.end(JSON.stringify({ data: [{ b64_json: imageOverride || png }] }))
     } else { res.statusCode=404; res.end('{}') }
   })
@@ -180,6 +186,39 @@ describe('PHP game pipeline', () => {
 })
 
 describe('transparent image acceptance', () => {
+  it('uses the transparent-image model and safely reports rejected settings without losing or regenerating code', async () => {
+    expect(await (await call('config')).json()).toMatchObject({codeModel:'gpt-6-sol',imageModel:'gpt-image-1.5'})
+    const g=await (await call('create',{template:exampleTemplate(),requestId:'image-rejected-setting',withArt:true},{key})).json()
+    await call('step',{id:g.id},{key});await accept(g.id)
+    const before=(await (await call('get',undefined,{id:g.id})).json()).game
+    const beforeCodeCalls=codeCalls, beforeImageCalls=imageCalls
+    for (const rejection of [
+      {status:400,param:'background',code:'invalid_value'},
+      {status:404,param:'model',code:'model_not_found'},
+      {status:400,param:key,code:key},
+    ]) {
+      imageRejection=rejection
+      try {
+        const failure=await call('step',{id:g.id},{key})
+        expect(failure.status).toBe(502)
+        const message=await failure.text()
+        expect(message).toContain(`HTTP ${rejection.status}`)
+        expect(message).toContain('Saved code is kept.')
+        expect(message).not.toContain(key)
+        if (rejection.param==='background') expect(message).toContain('setting: background; reason: invalid_value')
+        if (rejection.param==='model') expect(message).toContain('Check the configured model and your project access.')
+        if (rejection.param===key) { expect(message).not.toContain('setting:'); expect(message).not.toContain('reason:') }
+        const saved=(await (await call('get',undefined,{id:g.id})).json()).game
+        expect(saved).toMatchObject({id:g.id,state:'code',hasArt:false,buildHash:before.buildHash})
+      } finally {imageRejection=null}
+    }
+    expect(imageCalls).toBe(beforeImageCalls+3)
+    expect((await (await call('step',{id:g.id},{key})).json()).state).toBe('testing')
+    expect((await accept(g.id)).state).toBe('ready')
+    expect(codeCalls).toBe(beforeCodeCalls)
+    expect(imageCalls).toBe(beforeImageCalls+4)
+    expect((await readFile(join(directory,'games.sqlite'))).includes(Buffer.from(key))).toBe(false)
+  })
   it('rejects opaque, malformed and wrong-size images while keeping code resumable', async () => {
     const g=await (await call('create',{template:exampleTemplate(),requestId:'transparent-images',withArt:true},{key})).json()
     await call('step',{id:g.id},{key});await accept(g.id)
