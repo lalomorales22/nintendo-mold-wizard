@@ -254,7 +254,7 @@ function generateArt(array $g, string $key): string {
     $t = json_decode($g['template'], true); $p = json_decode($g['payload'], true);
     if (!extension_loaded('gd')) fail('PNG sprite checks require the PHP GD extension. Enable GD or finish without art.', 503);
     $animated = ($p['assetLayout'] ?? '') === 'animated-v1';
-    $layout = $animated ? 'EXACTLY 8 columns by 8 rows of 128x128 pixel cells on a 1024x1024 image. Coordinates below are zero-based. Hero block: columns 0-3, rows 0-3. Enemy block: columns 4-7, rows 0-3. Boss block: columns 0-3, rows 4-7. Each 4x4 character block contains four facing directions, one per row, in this exact order: DOWN (front), LEFT (left profile), RIGHT (right profile), UP (back). Each row contains four poses: column 0 neutral idle, column 1 left foot forward, column 2 passing pose, column 3 right foot forward. Same character, proportions, palette, scale and foot baseline in every frame. Feet at 85% cell height; entire body within the middle 75% of cell width and height. The poses must visibly differ while keeping a fixed anchor. Props: cell (4,4) collectible, cell (5,4) terrain tile, cell (6,4) decorative plant or rock. Remaining cells fully transparent and empty.'
+    $layout = $animated ? 'EXACTLY 8 columns by 8 rows of 128x128 pixel cells on a 1024x1024 image. There must be 51 separate complete sprites: 16 hero poses, 16 enemy poses, 16 boss poses, and 3 props. Coordinates below are zero-based. Hero block: columns 0-3, rows 0-3. Enemy block: columns 4-7, rows 0-3. Boss block: columns 0-3, rows 4-7. Each 4x4 character block contains four facing directions, one per row, in this exact order: DOWN (front), LEFT (left profile), RIGHT (right profile), UP (back). Each row contains four poses: column 0 neutral idle, column 1 left foot forward, column 2 passing pose, column 3 right foot forward. Same character, proportions, palette, scale and foot baseline in every frame. Feet at 85% cell height; entire body within the middle 75% of cell width and height. Leave at least 16 fully transparent pixels between complete sprites, including tails, ears, weapons and feet. No sprite may touch another or the image edge. The poses must visibly differ while keeping a fixed anchor. Props: cell (4,4) collectible, cell (5,4) terrain tile, cell (6,4) decorative plant or rock. Remaining cells fully transparent and empty. Row sprite counts, top to bottom, MUST be 8, 8, 8, 8, 7, 4, 4, 4. Do not compress the lower four rows into two rows.'
         : 'EXACTLY 3 columns by 2 rows of equal cells on a 1536x1024 image. Top row: hero, enemy, collectible. Bottom row: terrain, scenery, boss. Center each subject in its cell.';
     $prompt = 'Draw an original '.$t['parameters']['artStyle'].' game sprite sheet for '.$t['gameTitle'].'. '.$layout.' No grid lines, borders, gutters, words, labels or text. Isolated sprites on a fully TRANSPARENT background with true alpha. No solid backdrop, checkerboard pattern, scenery behind characters, ground planes or cast shadows. Never paint navy rectangles. Each sprite will be cropped exactly at the cell boundary. Crisp silhouettes, no antialiased halos. Respect the grid and transparency above; the following brief supplies character designs only: '.substr($p['artPrompt'],0,5000);
     $r = openai('images/generations', ['model'=>envValue('OPENAI_IMAGE_MODEL','gpt-image-1.5'), 'prompt'=>$prompt,
@@ -276,7 +276,86 @@ function generateArt(array $g, string $key): string {
     imagedestroy($decoded);
     if ($transparent < $samples*.05) fail('The image returned an opaque backdrop instead of transparent sprites. Code is saved; retry artwork or finish without art.',502);
     if ($visible < $samples*.01) fail('The sprite sheet is empty. Code is saved; retry artwork or finish without art.',502);
+    if ($animated) {
+        // Preserve the paid source even if its layout cannot be packed safely.
+        query('INSERT INTO game_revisions (game_id,saved_at,payload,image) VALUES (?,?,?,?)',[$g['id'],gmdate('c'),$g['payload'],$image]);
+        return fitAnimatedSprites($image);
+    }
     return $image;
+}
+/** Find complete opaque silhouettes, not presumed fixed grid boundaries. */
+function spriteBounds(GdImage $source): array {
+    $w=imagesx($source);$h=imagesy($source);
+    imagepalettetotruecolor($source);
+    // Tiny isolated noise and faint glow are not part of a pixel-art silhouette.
+    $runs=static function(array $counts,int $minimum):array {
+        $runs=[];$start=null;$last=-1;
+        foreach($counts as $position=>$count)if($count>=$minimum){
+            if($start!==null && $position-$last>8){$runs[]=[$start,$last];$start=null;}
+            if($start===null)$start=$position;
+            $last=$position;
+        }
+        if($start!==null)$runs[]=[$start,$last];
+        return array_values(array_filter($runs,static fn($r)=>$r[1]-$r[0]>=7));
+    };
+    $rowCounts=array_fill(0,$h,0);
+    for($y=0;$y<$h;$y++)for($x=0;$x<$w;$x++)if(((imagecolorat($source,$x,$y)>>24)&127)<96)$rowCounts[$y]++;
+    $rows=[];
+    foreach($runs($rowCounts,6) as [$top,$bottom]){
+        $columns=array_fill(0,$w,0);
+        for($y=$top;$y<=$bottom;$y++)for($x=0;$x<$w;$x++)if(((imagecolorat($source,$x,$y)>>24)&127)<96)$columns[$x]++;
+        $row=[];
+        foreach($runs($columns,3) as [$left,$right]){
+            $x0=$w;$y0=$h;$x1=-1;$y1=-1;
+            // Expand into the transparent gutter to retain detached details.
+            for($y=max(0,$top-7);$y<=min($h-1,$bottom+7);$y++)for($x=max(0,$left-7);$x<=min($w-1,$right+7);$x++){
+                if(((imagecolorat($source,$x,$y)>>24)&127)>=96)continue;
+                $x0=min($x0,$x);$y0=min($y0,$y);$x1=max($x1,$x);$y1=max($y1,$y);
+            }
+            $row[]=[$x0,$y0,$x1-$x0+1,$y1-$y0+1];
+        }
+        if($row)$rows[]=$row;
+    }
+    return $rows;
+}
+/** Repack measured rectangles with a shared character scale and foot baseline. */
+function packSpriteFrames(GdImage $source,array $frames): string {
+    $out=imagecreatetruecolor(1024,1024);imagealphablending($out,false);imagesavealpha($out,true);
+    imagefill($out,0,0,imagecolorallocatealpha($out,0,0,0,127));
+    imagealphablending($source,false);imagesavealpha($source,true);
+    $groups=[];
+    foreach($frames as $frame){[$x,$y,$w,$h]=$frame['bounds'];
+        if($w<8||$h<8||$x<=0||$y<=0||$x+$w>=imagesx($source)||$y+$h>=imagesy($source))fail('A sprite touches the image edge or is incomplete. Code and source artwork are saved; retry artwork or finish without art.',502);
+        $group=$frame['group'];$groups[$group]=max($groups[$group]??0,$w,$h);
+    }
+    // Clear faint glows without changing the colors of the character itself.
+    for($y=0;$y<imagesy($source);$y++)for($x=0;$x<imagesx($source);$x++)if(((imagecolorat($source,$x,$y)>>24)&127)>=96)imagesetpixel($source,$x,$y,0x7f000000);
+    foreach($frames as $frame){
+        [$x,$y,$w,$h]=$frame['bounds'];[$col,$row]=$frame['cell'];
+        $scale=96/$groups[$frame['group']];$dw=max(1,(int)round($w*$scale));$dh=max(1,(int)round($h*$scale));
+        imagecopyresized($out,$source,$col*128+intdiv(128-$dw,2),$row*128+112-$dh,$x,$y,$dw,$dh,$w,$h);
+    }
+    ob_start();imagepng($out);$bytes=ob_get_clean();imagedestroy($out);
+    return base64_encode($bytes);
+}
+function fitAnimatedSprites(string $image): string {
+    $source=@imagecreatefromstring(base64_decode($image,true));
+    if(!$source || imagesx($source)!==1024 || imagesy($source)!==1024)fail('Sprite fitting requires a 1024 by 1024 PNG.',422);
+    try {
+        $rows=spriteBounds($source);$counts=array_map('count',$rows);
+        if($counts!==[8,8,8,8,7,4,4,4])fail('The artwork has overlapping, missing or misarranged sprite frames. Code and source artwork are saved; retry artwork or finish without art.',502);
+        $frames=[];
+        foreach($rows as $row=>$bounds)foreach($bounds as $col=>$rect){
+            $group=$row<4?($col<4?'hero':'enemy'):($col<4?'boss':'prop-'.$col);
+            $frames[]=['bounds'=>$rect,'cell'=>[$col,$row],'group'=>$group];
+        }
+        // Adjacent frames must never share any source pixels.
+        foreach($frames as $i=>$a)foreach(array_slice($frames,$i+1) as $b){
+            [$x,$y,$w,$h]=$a['bounds'];[$bx,$by,$bw,$bh]=$b['bounds'];
+            if($x<$bx+$bw&&$bx<$x+$w&&$y<$by+$bh&&$by<$y+$h)fail('Two sprite silhouettes overlap. Code and source artwork are saved; retry artwork or finish without art.',502);
+        }
+        return packSpriteFrames($source,$frames);
+    } finally {imagedestroy($source);}
 }
 /** Remove only border-connected, nearly uniform mattes from legacy character cells. */
 function cleanSpriteBackgrounds(array $g): string {

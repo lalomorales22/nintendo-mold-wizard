@@ -15,13 +15,19 @@ let planMode = 'valid'
 let codeOverride = ''
 let codeMode = 'valid', gameId = '', demoHtml = ''
 const key = 'sk-fixture-not-a-real-key-1234567890'
-function sheetPng(opaque = false, width = 1024, height = 1024, empty = false) {
+function sheetPng(opaque = false, width = 1024, height = 1024, empty = false, layout = 'grid') {
   const header = Buffer.alloc(13); header.writeUInt32BE(width,0); header.writeUInt32BE(height,4); header[8]=8; header[9]=6
   const pixels=Buffer.alloc((width*4+1)*height)
   for(let y=0;y<height;y++) for(let x=0;x<width;x++) {
     const offset=y*(width*4+1)+1+x*4
     pixels[offset]=200; pixels[offset+1]=50; pixels[offset+2]=100
-    pixels[offset+3]=empty ? 0 : opaque || (x%128>32 && x%128<96 && y%128>32 && y%128<96) ? 255 : 0
+    pixels[offset+3]=!empty&&opaque?255:0
+  }
+  if(!empty&&!opaque) for(let row=0;row<(layout==='missing'?6:8);row++)for(let col=0;col<(row<4?8:row===4?7:4);col++) {
+    const left=layout==='clipped'&&row===0&&col===0?0:layout==='shifted'?48+col*120:33+col*128
+    const top=layout==='shifted'?60+row*115:33+row*128
+    const w=layout==='touching'&&row===0&&col===0?140:63, h=layout==='shifted'?70:63
+    for(let y=top;y<Math.min(height,top+h);y++)for(let x=left;x<Math.min(width,left+w);x++)pixels[y*(width*4+1)+1+x*4+3]=255
   }
   const chunk=(name:string,data:Buffer)=>{const body=Buffer.concat([Buffer.from(name),data]),size=Buffer.alloc(4),crc=Buffer.alloc(4);size.writeUInt32BE(data.length);crc.writeUInt32BE(crc32(body));return Buffer.concat([size,body,crc])}
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(pixels)),chunk('IEND',Buffer.alloc(0))]).toString('base64')
@@ -147,7 +153,8 @@ describe('PHP game pipeline', () => {
     await call('step',{id:gameId},{key})
     expect(codeCalls).toBe(1); expect(imageCalls).toBe(2)
     const html=await (await call('play',undefined,{id:gameId})).text()
-    expect(JSON.parse(html.match(/const CONFIG=(.+);/)! [1]).art).toBe('data:image/png;base64,'+png); expect(html).toContain(generatedCode); expect(html).not.toContain(key)
+    const art=Buffer.from(await (await call('art',undefined,{id:gameId})).arrayBuffer()).toString('base64')
+    expect(JSON.parse(html.match(/const CONFIG=(.+);/)! [1]).art).toBe('data:image/png;base64,'+art); expect(html).toContain(generatedCode); expect(html).not.toContain(key)
     expect((await readFile(join(directory,'games.sqlite'))).includes(Buffer.from(key))).toBe(false)
   })
   it('keeps private games private and restricts updates to their owner', async () => {
@@ -219,10 +226,11 @@ describe('transparent image acceptance', () => {
     expect(imageCalls).toBe(beforeImageCalls+4)
     expect((await readFile(join(directory,'games.sqlite'))).includes(Buffer.from(key))).toBe(false)
   })
-  it('rejects opaque, malformed and wrong-size images while keeping code resumable', async () => {
+  it('rejects opaque, malformed, incomplete and touching sheets, then packs offset frames without regenerating code', async () => {
     const g=await (await call('create',{template:exampleTemplate(),requestId:'transparent-images',withArt:true},{key})).json()
     await call('step',{id:g.id},{key});await accept(g.id)
-    for(const invalid of [sheetPng(true), sheetPng(false,512,512), sheetPng(false,1024,1024,true), Buffer.from('not an image').toString('base64')]) {
+    const calls=codeCalls
+    for(const invalid of [sheetPng(true), sheetPng(false,512,512), sheetPng(false,1024,1024,true), Buffer.from('not an image').toString('base64'), ...['missing','touching','clipped'].map(layout=>sheetPng(false,1024,1024,false,layout))]) {
       imageOverride=invalid
       try {
         expect((await call('step',{id:g.id},{key})).status).toBe(502)
@@ -230,7 +238,22 @@ describe('transparent image acceptance', () => {
         expect(saved.state).toBe('code');expect(saved.hasArt).toBe(false)
       } finally {imageOverride=''}
     }
-    expect((await (await call('step',{id:g.id},{key})).json()).state).toBe('testing')
+    imageOverride=sheetPng(false,1024,1024,false,'shifted')
+    try {expect((await (await call('step',{id:g.id},{key})).json()).state).toBe('testing')}finally{imageOverride=''}
+    const inspection=spawnSync('php',['-r',`
+      $db=new PDO('sqlite:'.$argv[1].'/games.sqlite');$q=$db->prepare('SELECT image FROM games WHERE id=?');$q->execute([$argv[2]]);$im=imagecreatefromstring(base64_decode($q->fetchColumn()));
+      $unsafe=0;$occupied=[];
+      for($y=0;$y<1024;$y++)for($x=0;$x<1024;$x++)if(((imagecolorat($im,$x,$y)>>24)&127)<96){
+        if($x%128<16||$x%128>111||$y%128<16||$y%128>111)$unsafe++;
+        $occupied[intdiv($y,128)*8+intdiv($x,128)]=true;
+      }
+      $q=$db->prepare('SELECT count(*) FROM game_revisions WHERE game_id=?');$q->execute([$argv[2]]);
+      echo json_encode(['unsafe'=>$unsafe,'cells'=>array_keys($occupied),'sources'=>$q->fetchColumn()]);
+    `,directory,g.id],{encoding:'utf8'})
+    expect(inspection.status,inspection.stderr).toBe(0)
+    const result=JSON.parse(inspection.stdout)
+    expect(result.unsafe).toBe(0);expect(result.cells).toHaveLength(51);expect(result.sources).toBe(4)
+    expect(codeCalls).toBe(calls)
     expect((await accept(g.id)).state).toBe('ready')
   })
 })
