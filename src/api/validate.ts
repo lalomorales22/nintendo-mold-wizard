@@ -1,5 +1,5 @@
 import { apiUrl, getGame, mutate } from './generate'
-import type { Cartridge } from '../model/types'
+import type { AiOptions, Cartridge } from '../model/types'
 
 /** Run generated code only in the same opaque-origin sandbox used by the player. */
 export async function validateGame(id: string, csrf: string): Promise<Cartridge> {
@@ -27,4 +27,4 @@ export async function validateGame(id: string, csrf: string): Promise<Cartridge>
   })
   return mutate<Cartridge>('validate', { id, buildHash: game.buildHash, ...result }, csrf)
 }
-export const repairGame = (id: string, csrf: string, key: string, error?: string) => mutate<Cartridge>('repair', { id, error }, csrf, key)
+export const repairGame = (id: string, csrf: string, key: string, error?: string, options?: AiOptions) => mutate<Cartridge>('repair', { id, error }, csrf, key, options)

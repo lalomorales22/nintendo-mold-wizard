@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
+import { runArena } from './arena'
 import { ApiKeyRequiredError, runGeneration, runPromptGeneration, type GenerationPhase } from './generation'
 import type { GamePlan } from './plan'
 import { exampleTemplate } from './template'
-import type { ApiConfig, Cartridge, GameTemplate, GenerationJob } from './types'
+import type { AiOptions, ApiConfig, ArenaMatch, Cartridge, GameTemplate, GenerationJob } from './types'
 import { templateKey } from './wizard'
 
 function setup(hasKey = true) {
@@ -22,9 +23,9 @@ function setup(hasKey = true) {
     }),
     getConfig: vi.fn(async () => config),
     getGame: vi.fn(async (id: string) => structuredClone(cartridges.get(id)!)),
-    createGame: vi.fn(async (template: GameTemplate, withArt: boolean, _requestId: string, _csrf: string, _key: string, starter = false): Promise<Cartridge> => {
+    createGame: vi.fn(async (template: GameTemplate, withArt: boolean, _requestId: string, _csrf: string, _key: string, starter = false, options: AiOptions = {}): Promise<Cartridge> => {
       const game: Cartridge = { id: `cartridge-${++nextId}`, title: template.gameTitle, pitch: template.pitch, perspective: template.perspective!,
-        state: starter ? 'ready' : 'draft', withArt, owned: true, hasArt: false, published: false, createdAt: '2026-10-10T00:00:00Z', provider: starter ? 'starter' : 'openai',
+        state: starter ? 'ready' : 'draft', withArt, owned: true, hasArt: false, published: false, createdAt: '2026-10-10T00:00:00Z', provider: starter ? 'starter' : options.provider ?? 'openai', codeModel: options.model, arenaId: options.arenaId,
         summary: '', instructions: '', error: null, artStyle: template.parameters.artStyle, levelCount: template.levels.length }
       cartridges.set(game.id, { game: structuredClone(game), template: structuredClone(template) })
       return game
@@ -118,7 +119,7 @@ describe('runtime acceptance gate', () => {
     const game = await runGeneration({ template: exampleTemplate(), withArt: false, apiKey: '' }, service, events)
     const repaired = await runGeneration({ template: exampleTemplate(), withArt: false, apiKey: '', resumeId: game.id, repair: 'Missing helper' }, service, events)
     expect(repaired.id).toBe(game.id)
-    expect(service.repairGame).toHaveBeenCalledWith(game.id, 'test-token', '', 'Missing helper')
+    expect(service.repairGame).toHaveBeenCalledWith(game.id, 'test-token', '', 'Missing helper', {})
     expect(service.validateGame).toHaveBeenCalledTimes(2)
     expect(service.createGame).toHaveBeenCalledTimes(1)
   })
@@ -151,7 +152,7 @@ describe('paragraph to playable cartridge', () => {
     const pending=runPromptGeneration(request,{...service,planGame},events)
     request.prompt='Edited while building'; reference.label='Another ROM'
     const result=await pending
-    expect(planGame.mock.calls[0]).toEqual(['Moon penguin delivery game.',{image:'data:image/png;base64,fixture',label:'Original tile page'},'test-token',''])
+    expect(planGame.mock.calls[0]).toEqual(['Moon penguin delivery game.',{image:'data:image/png;base64,fixture',label:'Original tile page'},'test-token','',undefined])
     expect(cartridges.get(result.id)?.template.referenceTiles?.label).toBe('Original tile page')
   })
   it('does not buy code or art when planning fails or a key is missing', async () => {
@@ -172,5 +173,52 @@ describe('paragraph to playable cartridge', () => {
     expect(saved.status).toBe('failed')
     const result=await runGeneration({template:exampleTemplate(),apiKey:'',withArt:true,resumeId:saved.id},service,events)
     expect(result.id).toBe(saved.id);expect(result.title).toBe('Moon Mail');expect(planGame).toHaveBeenCalledOnce()
+  })
+})
+
+
+describe('provider selection and arena recovery', () => {
+  it('runs Claude without OpenAI when art is disabled and keeps its selection across awaited work', async () => {
+    const {service,events}=setup(false)
+    const options: AiOptions={provider:'anthropic',model:'claude-sonnet-5-5',anthropicKey:'private-claude-key',workspaceId:'wrkspc_test'}
+    const planGame=vi.fn(async()=>quickPlan)
+    const pending=runPromptGeneration({prompt:'Penguin delivers moon letters',apiKey:'',withArt:false,options},{...service,planGame},events)
+    options.provider='openai';options.model='gpt-other';options.anthropicKey='changed'
+    const game=await pending
+    expect(game.provider).toBe('anthropic');expect(game.codeModel).toBe('claude-sonnet-5-5')
+    expect(planGame.mock.calls[0]).toEqual(expect.arrayContaining([expect.objectContaining({provider:'anthropic',anthropicKey:'private-claude-key'})]))
+    expect(service.generateStep).toHaveBeenCalledOnce()
+  })
+  it('requires both keys before paying Claude for a new game with OpenAI artwork', async () => {
+    const {service,events}=setup(false),planGame=vi.fn(async()=>quickPlan)
+    await expect(runPromptGeneration({prompt:'Penguin delivers moon letters',apiKey:'',withArt:true,options:{provider:'anthropic',anthropicKey:'claude-key'}},{...service,planGame},events)).rejects.toThrow('Connect OpenAI')
+    expect(planGame).not.toHaveBeenCalled();expect(service.createGame).not.toHaveBeenCalled()
+  })
+  it('uses the saved provider for repairs but only requires OpenAI to finish existing Claude art', async () => {
+    const {service,events,cartridges}=setup(false)
+    const game=await runGeneration({template:exampleTemplate(),apiKey:'',withArt:false,options:{provider:'anthropic',anthropicKey:'claude-key'}},service,events)
+    await expect(runGeneration({template:exampleTemplate(),apiKey:'openai-key',withArt:false,resumeId:game.id,repair:true,options:{provider:'openai'}},service,events)).rejects.toThrow('Connect Anthropic')
+    expect(service.repairGame).not.toHaveBeenCalled()
+    const saved=cartridges.get(game.id)!.game;saved.state='code';saved.withArt=true
+    const result=await runGeneration({template:exampleTemplate(),apiKey:'openai-key',withArt:true,resumeId:game.id,options:{provider:'openai'}},service,events)
+    expect(result.hasArt).toBe(true);expect(result.provider).toBe('anthropic')
+  })
+  it('keeps a successful opponent when one fails and resumes only the unfinished round', async () => {
+    const {service,events,cartridges}=setup(true)
+    const planGame=vi.fn(async()=>quickPlan)
+    const match: ArenaMatch={id:'arena-fixture',prompt:'Penguin delivers moon letters',settings:{openai:'gpt-6-sol',anthropic:'claude-sonnet-5-5',withArt:false},games:[],createdAt:'2026-10-20T00:00:00Z',winner:null}
+    service.generateStep.mockRejectedValueOnce(new Error('OpenAI temporarily unavailable'))
+    const credentials: AiOptions={anthropicKey:'claude-key',provider:'openai',model:'ignored'}
+    const errors=await runArena(match,'',credentials,{...service,planGame},()=>events)
+    expect(errors).toEqual({openai:'OpenAI temporarily unavailable'})
+    match.games=[...cartridges.values()].map(c=>c.game)
+    expect(match.games.find(g=>g.provider==='anthropic')?.state).toBe('ready')
+    expect(planGame).toHaveBeenCalledTimes(2);expect(service.repairGame).not.toHaveBeenCalled()
+    expect(await runArena(match,'',{}, {...service,planGame},()=>events)).toEqual({})
+    expect(service.createGame).toHaveBeenCalledTimes(2);expect(planGame).toHaveBeenCalledTimes(2)
+    expect(service.generateStep).toHaveBeenCalledTimes(3)
+    expect(match.games.every(g=>g.state==='ready')).toBe(true)
+    expect(match.games.map(g=>g.codeModel)).toEqual(['gpt-6-sol','claude-sonnet-5-5'])
+    expect(match.games.every(g=>g.arenaId===match.id)).toBe(true)
   })
 })

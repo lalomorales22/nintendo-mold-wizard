@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { QuickBuild } from './QuickBuild'
-import { getConfig, mutate } from '../api/generate'
+import { getConfig, mutate, selection } from '../api/generate'
 import { planToTemplate, type GamePlan, type TileReference } from '../model/plan'
+import { ApiKeyRequiredError, requireKey } from '../model/generation'
 import { getMold } from '../model/molds'
 import { useStudio } from '../studio'
 import '../rom/rom.css'
@@ -10,7 +11,7 @@ export function AiPlanner({ reference, sourceKey = 'idea' }: { reference?: TileR
   const studio = useStudio()
   const [prompt, setPrompt] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ key: string; plan: GamePlan } | null>(null)
-  const key = JSON.stringify([sourceKey, reference, prompt])
+  const key = JSON.stringify([sourceKey, reference, prompt, studio.provider, studio.aiOptions.model])
   const latest = useRef(key), running = useRef(false)
   const plan = result?.key === key ? result.plan : null
   useLayoutEffect(() => { latest.current = key; return () => { latest.current = '' } }, [key])
@@ -26,13 +27,11 @@ export function AiPlanner({ reference, sourceKey = 'idea' }: { reference?: TileR
     const snapshot = key
     try {
       const config = await getConfig()
-      if (!studio.apiKey.trim() && !config.serverKeyAvailable) {
-        studio.setSettingsOpen(true)
-        throw new Error('Connect your OpenAI key, then create the plan. Your current editor draft is kept until you choose Use this plan.')
-      }
-      const plan = await mutate<GamePlan>('plan', { prompt, reference }, config.csrf, studio.apiKey)
+      const options = { ...studio.aiOptions }
+      requireKey(options.provider ?? 'openai', config, studio.apiKey, options)
+      const plan = await mutate<GamePlan>('plan', { prompt, reference, ...selection(options) }, config.csrf, studio.apiKey, options)
       if (latest.current === snapshot) setResult({ key: snapshot, plan })
-    } catch (e) { if (latest.current === snapshot) setError((e as Error).message) }
+    } catch (e) { if (e instanceof ApiKeyRequiredError) studio.setSettingsOpen(true); if (latest.current === snapshot) setError((e as Error).message) }
     finally { running.current = false; setBusy(false) }
   }
   return <section className="ai-planner card">
@@ -41,7 +40,7 @@ export function AiPlanner({ reference, sourceKey = 'idea' }: { reference?: TileR
     {reference && <figure className="ai-reference"><img src={reference.image} alt="The current decoded tile page to include in the AI plan" /><figcaption>{reference.label}<br />Preview colors. Tile roles and gameplay are AI proposals for you to review.</figcaption></figure>}
     <label className="label" htmlFor={`ai-idea-${sourceKey === 'idea' ? 'new' : 'rom'}`}>What should the new game be?</label>
     <textarea id={`ai-idea-${sourceKey === 'idea' ? 'new' : 'rom'}`} className="input" disabled={studio.busy} rows={4} maxLength={3000} value={prompt} onChange={e => { setPrompt(e.target.value); setError('') }} placeholder="A penguin boxer fights through three icy arenas. Z punches, X blocks. Win each round to face a bigger rival. Use chunky pixel art and make it easy to learn." />
-    <p className="rom-note">{reference ? 'Sends this tile page, its format/offset label and your description to OpenAI. Your ROM file stays local.' : 'Sends your description to OpenAI.'} Builds an original browser game.</p>
+    <p className="rom-note">{reference ? 'Sends this tile page, its format/offset label and your description to the selected provider. Your ROM file stays local.' : 'Sends your description to the selected provider.'} Builds an original browser game.</p>
     <QuickBuild prompt={prompt} reference={reference} disabled={busy || studio.busy || prompt.trim().length < 10} />
     <button className="btn-ghost mt-4" disabled={busy || studio.busy || prompt.trim().length < 10} onClick={() => void analyze()}>{busy ? 'Analyzing and planning…' : 'Just make a plan first →'}</button>
     {busy && <p role="status" className="rom-note">Your plan is being written. Changes to the idea or tiles discard this request’s result.</p>}

@@ -1,11 +1,25 @@
 import type { TileReference } from './model/plan'
 import { createContext, useContext } from 'react'
-import type { ApiConfig, Cartridge, GameTemplate } from './model/types'
+import type { AiOptions, ApiConfig, Cartridge, CodeProvider, GameTemplate } from './model/types'
 
 export interface Studio {
   config: ApiConfig | null
   apiKey: string
   setApiKey: (key: string) => void
+  anthropicKey: string
+  setAnthropicKey: (key: string) => void
+  workspaceId: string
+  setWorkspaceId: (id: string) => void
+  provider: CodeProvider
+  setProvider: (provider: CodeProvider) => void
+  openaiModel: string
+  setOpenaiModel: (model: string) => void
+  anthropicModel: string
+  setAnthropicModel: (model: string) => void
+  aiOptions: AiOptions
+  battle: (prompt: string, resumeId?: string) => Promise<void>
+  arenaId: string | null
+  arenaProgress: Partial<Record<CodeProvider, string>>
   settingsOpen: boolean
   setSettingsOpen: (open: boolean) => void
   busy: boolean

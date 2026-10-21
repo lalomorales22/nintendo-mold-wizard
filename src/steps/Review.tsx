@@ -1,3 +1,4 @@
+import { ModelPicker } from '../components/ModelPicker'
 import { GENERATION_LABELS } from '../model/generation'
 import { getGame } from '../api/generate'
 import { matchingJob, templateKey } from '../model/wizard'
@@ -80,6 +81,7 @@ export function Review({ state }: StepProps) {
       </div>
 
       <section className="card mt-4">
+        <ModelPicker />
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" className="btn-primary text-base" disabled={issues.length > 0 || running} onClick={generate}>
             {running ? 'Generating…' : job?.status === 'done' ? 'Generate again' : '▶ Generate game'}
@@ -88,11 +90,11 @@ export function Review({ state }: StepProps) {
           <label className="flex items-center gap-2 text-sm text-zinc-300"><input id="with-art" type="checkbox" checked={studio.withArt} onChange={e => studio.setWithArt(e.target.checked)} /> Generate original sprite artwork</label>
         </div>
 
-        {!studio.apiKey.trim() && !studio.config?.serverKeyAvailable && <div className="generation-key-notice"><p><b>Connect OpenAI to generate this game.</b> No API key is configured yet. Enter your own key in settings, or add OPENAI_API_KEY to your local .env file.</p><button className="btn-ghost" onClick={() => studio.setSettingsOpen(true)}>Enter API key</button></div>}
+        {!(studio.provider === 'anthropic' ? studio.anthropicKey.trim() || studio.config?.anthropicKeyAvailable : studio.apiKey.trim() || studio.config?.serverKeyAvailable) && <div className="generation-key-notice"><p><b>Connect {studio.provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} to generate this game.</b> Add its API key in settings or your private .env file. Generated sprites also require OpenAI.</p><button className="btn-ghost" onClick={() => studio.setSettingsOpen(true)}>Connect providers</button></div>}
         {studio.error && <div className="error-banner mt-4" role="alert">{studio.error}</div>}
         {running && <p className="generation-notice mt-4" role="status">{studio.generationMessage || 'Starting generation…'}</p>}
         {!job && !running && <p className="mt-4 text-sm text-zinc-300">This draft has no playable cartridge yet. Generate it to create a new game; your earlier games are in the gallery.</p>}
-        <p className="mt-4 text-xs leading-relaxed text-zinc-400">OpenAI writes a complete browser game from these sheets. Artwork adds a separate image request. Your cartridge saves privately to your gallery. Keep this tab open while generating; interrupted drafts can be resumed.</p>
+        <p className="mt-4 text-xs leading-relaxed text-zinc-400">Your selected provider writes a complete browser game from these sheets. Artwork adds a separate OpenAI image request. Your cartridge saves privately to your gallery. Keep this tab open while generating; interrupted drafts can be resumed.</p>
         {t.perspective === 'platformer-2d' && <button className="mt-4 text-sm text-emerald-300 hover:underline" disabled={running || issues.length > 0} onClick={() => studio.generate(true)}>Try the playable starter instead · no API key needed →</button>}
         {job && (
           <div className="mt-4">

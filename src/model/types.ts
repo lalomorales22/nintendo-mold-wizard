@@ -138,6 +138,8 @@ export interface AssetManifest {
   slots: [number, number][]
 }
 export interface Cartridge {
+  codeModel?: string | null
+  arenaId?: string | null
   assets?: AssetManifest
   id: string
   title: string
@@ -146,7 +148,7 @@ export interface Cartridge {
   createdAt: string
   state: 'draft' | 'code' | 'testing' | 'ready'
   buildHash?: string
-  provider: 'openai' | 'starter'
+  provider: 'openai' | 'anthropic' | 'starter'
   withArt: boolean
   hasArt: boolean
   published: boolean
@@ -162,4 +164,23 @@ export interface ApiConfig {
   serverKeyAvailable: boolean
   codeModel: string
   imageModel: string
+  anthropicModel?: string
+  anthropicKeyAvailable?: boolean
+}
+export type CodeProvider = 'openai' | 'anthropic'
+/** Credentials exist only in React memory and request headers, never saved drafts. */
+export interface AiOptions {
+  provider?: CodeProvider
+  model?: string
+  anthropicKey?: string
+  workspaceId?: string
+  arenaId?: string
+}
+export interface ArenaMatch {
+  id: string
+  prompt: string
+  settings: { openai: string; anthropic: string; withArt: boolean }
+  createdAt: string
+  winner: CodeProvider | 'tie' | null
+  games: Cartridge[]
 }
