@@ -261,8 +261,15 @@ const CONFIG=__CONFIG__;
 function notify(type,data={}){if(parent!==window)parent.postMessage({type,...data},'*')}
 let firstFailure='';
 function failure(message){if(firstFailure)return;firstFailure=String(message);const e=document.getElementById('failure');e.style.display='block';e.textContent='This cartridge encountered an error: '+String(message).slice(0,400);notify('moldforge-error',{message:String(message).slice(0,400)})}
-window.addEventListener('error',e=>failure(e.message));window.addEventListener('unhandledrejection',e=>failure(e.reason?.message||'Unexpected game error'));
-</script><script>__CODE__</script><script>
+// Only attribute global errors to our named scripts. Extensions inject their own
+// content scripts/providers into frames; their errors must not stop a cartridge.
+const GAME_SOURCE='game-maker-cartridge-'+CONFIG.id+'.js',PLAYER_SOURCE='game-maker-player-'+CONFIG.id+'.js';
+function ownSource(value){return typeof value==='string'&&(value.includes(GAME_SOURCE)||value.includes(PLAYER_SOURCE))}
+window.addEventListener('error',e=>{if(ownSource(e.filename)||ownSource(e.error?.stack))failure(e.message)});
+window.addEventListener('unhandledrejection',e=>{if(ownSource(e.reason?.stack))failure(e.reason?.message||'Unexpected game error')});
+</script><script>__CODE__
+//# sourceURL=__GAME_SOURCE__
+</script><script>
 (async()=>{
 if(firstFailure)return;
 if(typeof createGame!=='function')throw new Error('The generated code did not define createGame(api).');
@@ -312,9 +319,10 @@ window.addEventListener('message',e=>{if(e.source!==parent)return;if(e.data?.typ
 notify('moldforge-ready');canvas.focus();
 function frame(now){const dt=Math.min(.04,(now-last)/1000||.016);last=now;try{if(!paused){game.update(dt);edges.clear();saveElapsed+=dt;if(saveElapsed>3){persist();saveElapsed=0}}ctx.save();game.render(ctx);ctx.restore();if(paused){ctx.fillStyle='#0009';ctx.fillRect(0,0,768,432);ctx.fillStyle='#fff';ctx.font='bold 28px monospace';ctx.textAlign='center';ctx.fillText('PAUSED',384,216);ctx.textAlign='left'}requestAnimationFrame(frame)}catch(e){failure(e.message)}}requestAnimationFrame(frame);
 })().catch(e=>failure(e.message));
+//# sourceURL=__PLAYER_SOURCE__
 </script></body></html>
 HTML;
-    return strtr($html, ['__TITLE__'=>$title, '__CONFIG__'=>$config, '__CODE__'=>$p['code']]);
+    return strtr($html, ['__TITLE__'=>$title, '__CONFIG__'=>$config, '__CODE__'=>$p['code'], '__GAME_SOURCE__'=>'game-maker-cartridge-'.$g['id'].'.js', '__PLAYER_SOURCE__'=>'game-maker-player-'.$g['id'].'.js']);
 }
 function demoCode(): string {
     return <<<'JS'

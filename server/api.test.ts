@@ -238,11 +238,11 @@ describe('runtime gate and AI plan API', () => {
     const element={style:{},textContent:'',getContext:()=>ctx,addEventListener:()=>{},focus:()=>{}}
     const ctx={fillRect:()=>{},save:()=>{},restore:()=>{},drawImage:()=>{}}
     class TestImage { width=1536; height=1024; async decode(){} }
-    const listeners:Record<string,(e:{message:string})=>void>={}
+    const listeners:Record<string,(e:{message:string;filename?:string})=>void>={}
     const context=createContext({document:{querySelector:()=>element,getElementById:()=>element,querySelectorAll:()=>[],addEventListener:()=>{}},parent:{postMessage:(v:{type:string;message?:string})=>messages.push(v)},window:{addEventListener:(name:string,fn:(e:{message:string})=>void)=>{listeners[name]=fn}},console,Set,Image:TestImage})
     for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
       try { await new Script(script).runInContext(context,{timeout:1000}) }
-      catch(e) { listeners.error?.({message:(e as Error).message}) }
+      catch(e) { listeners.error?.({message:(e as Error).message,filename:script.match(/sourceURL=(.+)/)?.[1]}) }
     }
     return messages
   }
@@ -262,6 +262,44 @@ describe('runtime gate and AI plan API', () => {
       expect(result.some(m=>m.type==='moldforge-tested')).toBe(false)
       expect(result[0]?.type).toBe('moldforge-error')
       expect(result[0]?.message).not.toBe('createGame is not defined')
+    }
+  })
+})
+
+
+describe('player error attribution', () => {
+  type BrowserError = { message?: string; filename?: string; error?: { stack: string }; reason?: { message?: string; stack?: string } }
+  function bootstrap() {
+    const script=[...demoHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1]
+    const id=JSON.parse(script.match(/const CONFIG=(.+);/)![1]).id
+    const messages:{type:string;message?:string}[]=[]
+    const listeners:Record<string,(event:BrowserError)=>void>={}
+    const failureElement={style:{display:'none'},textContent:''}
+    const context=createContext({window:{addEventListener:(name:string,fn:(event:BrowserError)=>void)=>{listeners[name]=fn}},parent:{postMessage:(value:{type:string;message?:string})=>messages.push(value)},document:{getElementById:()=>failureElement}})
+    new Script(script).runInContext(context)
+    return {id,listeners,messages,failureElement}
+  }
+  it('keeps injected wallet and storage errors out of the game failure banner', () => {
+    const {listeners,messages,failureElement}=bootstrap()
+    listeners.error({message:'Failed to connect to MetaMask',filename:'chrome-extension://wallet/inpage.js',error:{stack:'Error at chrome-extension://wallet/inpage.js:1:22'}})
+    listeners.error({message:'Cannot read sessionStorage',filename:'moz-extension://extension/contentScript.js'})
+    listeners.error({message:'Possible EventEmitter memory leak detected',filename:'contentscript.js'})
+    listeners.unhandledrejection({reason:{message:'Failed to connect to MetaMask',stack:'Error at chrome-extension://wallet/inpage.js:1:2'}})
+    listeners.unhandledrejection({reason:{message:'Failed to connect to MetaMask'}})
+    expect(messages).toEqual([])
+    expect(failureElement.style.display).toBe('none')
+  })
+  it('still reports cartridge syntax errors and preserves the first genuine error', () => {
+    const {id,listeners,messages}=bootstrap()
+    listeners.error({message:'Unexpected token',filename:`game-maker-cartridge-${id}.js`})
+    listeners.error({message:'createGame is not defined',filename:`game-maker-player-${id}.js`})
+    expect(messages).toEqual([{type:'moldforge-error',message:'Unexpected token'}])
+  })
+  it('attributes game and host promise failures by source, not by message wording', () => {
+    for(const source of ['cartridge','player']) {
+      const {id,listeners,messages}=bootstrap()
+      listeners.unhandledrejection({reason:{message:'Failed to connect to MetaMask',stack:`Error at createGame (game-maker-${source}-${id}.js:12:3)`}})
+      expect(messages).toEqual([{type:'moldforge-error',message:'Failed to connect to MetaMask'}])
     }
   })
 })

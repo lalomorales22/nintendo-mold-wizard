@@ -3,6 +3,7 @@ import { createGame, generateStep, getConfig, getGame } from './api/generate'
 import { validateGame, repairGame } from './api/validate'
 import { Create } from './components/Create'
 import { ApiKeyRequiredError, runGeneration } from './model/generation'
+import { GenerationStatus } from './components/GenerationStatus'
 import { Gallery } from './components/Gallery'
 import { RomLab } from './components/RomLab'
 import { Player } from './components/Player'
@@ -84,7 +85,7 @@ export default function App() {
       </aside>
       <div className="studio-main"><header className="top-bar"><div><span className="status-light" /> Game-Maker / CREATOR SYSTEM</div><span>{busy ? '✦ Building your cartridge…' : '● POWER ON'}</span></header>
         <main className="workspace"><Settings />{error && <div className="error-banner" role="alert"><p>{error}</p><button onClick={() => setError(null)} aria-label="Dismiss error">✕</button></div>}
-          {busy && <div className="generation-notice" role="status" aria-live="polite">✦ {generationMessage}</div>}
+          {busy && <GenerationStatus message={generationMessage} />}
           <div hidden={page !== 'rom'}><RomLab /></div>
           <div hidden={page !== 'create'}><Create state={state} startNew={startNewGame} continueDraft={() => setPage('studio')} openRoms={() => setPage('rom')} /></div>
           {page === 'rom' || page === 'create' ? null : page === 'gallery' ? <Gallery /> : <fieldset disabled={busy} className="min-w-0"><View state={state} dispatch={dispatch} /></fieldset>}

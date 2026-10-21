@@ -1,3 +1,4 @@
+import { GENERATION_LABELS } from '../model/generation'
 import { getGame } from '../api/generate'
 import { matchingJob, templateKey } from '../model/wizard'
 import { useStudio } from '../studio'
@@ -95,8 +96,8 @@ export function Review({ state }: StepProps) {
         {t.perspective === 'platformer-2d' && <button className="mt-4 text-sm text-emerald-300 hover:underline" disabled={running || issues.length > 0} onClick={() => studio.generate(true)}>Try the playable starter instead · no API key needed →</button>}
         {job && (
           <div className="mt-4">
-            <div className="flex justify-between text-xs text-zinc-400"><span className="font-mono">{job.id} · {job.status}</span><span>{job.progress}%</span></div>
-            <div className="mt-1 h-2 overflow-hidden rounded bg-zinc-800"><div className="h-full bg-cart-red transition-all" style={{ width: `${job.progress}%` }} /></div>
+            <div className="flex justify-between text-xs text-zinc-400"><span>{GENERATION_LABELS[job.status]}</span><span>{running ? 'In progress' : job.status === 'done' ? 'Complete' : 'Not running'}</span></div>
+            {running && <progress className="generation-progress" aria-label="Generation in progress" />}
             <pre className="mt-3 max-h-48 overflow-auto rounded bg-black/40 p-3 text-xs text-zinc-300">{job.log.join('\n')}</pre>
             {job.result && (
               <div className="mt-3 text-sm">

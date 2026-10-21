@@ -1,5 +1,10 @@
-import type { ApiConfig, Cartridge, GameTemplate, GenerationJob } from './types'
+import type { ApiConfig, Cartridge, GameTemplate, GenerationJob, JobStatus } from './types'
 import { templateKey } from './wizard'
+
+export const GENERATION_LABELS: Record<JobStatus, string> = {
+  queued: 'Draft saved', 'analyzing-template': 'Planning the game', 'building-levels': 'Writing game code',
+  'generating-assets': 'Creating artwork', packaging: 'Testing the game', done: 'Ready to play', failed: 'Needs attention',
+}
 
 export class ApiKeyRequiredError extends Error {
   constructor() {
