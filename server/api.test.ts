@@ -379,7 +379,7 @@ describe('runtime gate and AI plan API', () => {
     expect((await runProbe(code,'top-down',true)).at(-1)).toMatchObject({type:'moldforge-tested'})
   })
   it('catches syntax, missing methods, input-path failures and checkpoint failures', async () => {
-    const broken=[generatedCode.slice(0,-1),generatedCode.replace('render(ctx)','draw(ctx)'),generatedCode.replace('score+=dt','if(api.keys.has("ArrowRight"))missingHelper();score+=dt'),generatedCode.replace('if(d&&Number.isFinite(d.score))','if(Number.isFinite(d.score))'),generatedCode.replace('ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)',''),generatedCode.replace('ctx.fillRect(0,0,768,432)','ctx.fillRect(NaN,0,768,432)')]
+    const broken=[generatedCode.slice(0,-1),generatedCode.replace('return {','}return {'),generatedCode.replace('render(ctx)','draw(ctx)'),generatedCode.replace('score+=dt','if(api.keys.has("ArrowRight"))missingHelper();score+=dt'),generatedCode.replace('if(d&&Number.isFinite(d.score))','if(Number.isFinite(d.score))'),generatedCode.replace('ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)',''),generatedCode.replace('ctx.fillRect(0,0,768,432)','ctx.fillRect(NaN,0,768,432)')]
     for(const code of broken) {
       const result=await runProbe(code)
       expect(result.some(m=>m.type==='moldforge-tested')).toBe(false)
@@ -391,16 +391,17 @@ describe('runtime gate and AI plan API', () => {
 
 
 describe('player error attribution', () => {
-  type BrowserError = { message?: string; filename?: string; error?: { stack: string }; reason?: { message?: string; stack?: string } }
+  type BrowserError = { message?: string; filename?: string; error?: { name?: string; stack?: string }; reason?: { message?: string; stack?: string } }
   function bootstrap() {
     const script=[...demoHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)][0][1]
     const id=JSON.parse(script.match(/const CONFIG=(.+);/)![1]).id
     const messages:{type:string;message?:string}[]=[]
     const listeners:Record<string,(event:BrowserError)=>void>={}
     const failureElement={style:{display:'none'},textContent:''}
-    const context=createContext({window:{addEventListener:(name:string,fn:(event:BrowserError)=>void)=>{listeners[name]=fn}},parent:{postMessage:(value:{type:string;message?:string})=>messages.push(value)},document:{getElementById:()=>failureElement}})
+    const url=`http://127.0.0.1/api.php?action=probe&id=${id}`
+    const context=createContext({window:{addEventListener:(name:string,fn:(event:BrowserError)=>void)=>{listeners[name]=fn}},parent:{postMessage:(value:{type:string;message?:string})=>messages.push(value)},document:{URL:url,getElementById:()=>failureElement}})
     new Script(script).runInContext(context)
-    return {id,listeners,messages,failureElement}
+    return {id,listeners,messages,failureElement,url,context}
   }
   it('keeps injected wallet and storage errors out of the game failure banner', () => {
     const {listeners,messages,failureElement}=bootstrap()
@@ -409,8 +410,23 @@ describe('player error attribution', () => {
     listeners.error({message:'Possible EventEmitter memory leak detected',filename:'contentscript.js'})
     listeners.unhandledrejection({reason:{message:'Failed to connect to MetaMask',stack:'Error at chrome-extension://wallet/inpage.js:1:2'}})
     listeners.unhandledrejection({reason:{message:'Failed to connect to MetaMask'}})
+    listeners.error({message:'Unexpected token',filename:'chrome-extension://wallet/inpage.js',error:{name:'SyntaxError'}})
     expect(messages).toEqual([])
     expect(failureElement.style.display).toBe('none')
+  })
+  it('keeps the real inline parse error when sourceURL was not registered', () => {
+    const {listeners,messages,url,context}=bootstrap()
+    listeners.error({message:'Uncaught SyntaxError: Illegal return statement',filename:url,error:{name:'SyntaxError'}})
+    new Script('cartridgeLoading=false').runInContext(context)
+    listeners.error({message:'The generated code did not define createGame(api).',filename:url})
+    expect(messages).toEqual([{type:'moldforge-error',message:'Uncaught SyntaxError: Illegal return statement'}])
+  })
+  it('does not attribute unlabelled document errors or later injected syntax errors to the cartridge', () => {
+    const {listeners,messages,url,context}=bootstrap()
+    listeners.error({message:'Failed to connect to MetaMask',filename:url,error:{name:'Error'}})
+    new Script('cartridgeLoading=false').runInContext(context)
+    listeners.error({message:'Unexpected token',filename:url,error:{name:'SyntaxError'}})
+    expect(messages).toEqual([])
   })
   it('still reports cartridge syntax errors and preserves the first genuine error', () => {
     const {id,listeners,messages}=bootstrap()

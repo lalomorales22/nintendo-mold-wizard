@@ -338,18 +338,25 @@ function gameHtml(array $g, bool $probe = false): string {
 <script>
 const CONFIG=__CONFIG__;
 function notify(type,data={}){if(parent!==window)parent.postMessage({type,...data},'*')}
-let firstFailure='';
+let firstFailure='',cartridgeLoading=true;
 function failure(message){if(firstFailure)return;firstFailure=String(message);const e=document.getElementById('failure');e.style.display='block';e.textContent='This cartridge encountered an error: '+String(message).slice(0,400);notify('moldforge-error',{message:String(message).slice(0,400)})}
 // Only attribute global errors to our named scripts. Extensions inject their own
 // content scripts/providers into frames; their errors must not stop a cartridge.
 const GAME_SOURCE='game-maker-cartridge-'+CONFIG.id+'.js',PLAYER_SOURCE='game-maker-player-'+CONFIG.id+'.js';
 function ownSource(value){return typeof value==='string'&&(value.includes(GAME_SOURCE)||value.includes(PLAYER_SOURCE))}
-window.addEventListener('error',e=>{if(ownSource(e.filename)||ownSource(e.error?.stack))failure(e.message)});
+window.addEventListener('error',e=>{
+  // A script that fails to parse may never register its sourceURL. Browsers then
+  // report the document URL instead. Limit this fallback to cartridge loading
+  // and SyntaxError so unrelated injected provider failures remain excluded.
+  const inlineSyntax=cartridgeLoading&&e.error?.name==='SyntaxError'&&e.filename===document.URL;
+  if(ownSource(e.filename)||ownSource(e.error?.stack)||inlineSyntax)failure(e.message);
+});
 window.addEventListener('unhandledrejection',e=>{if(ownSource(e.reason?.stack))failure(e.reason?.message||'Unexpected game error')});
 </script><script>__CODE__
 //# sourceURL=__GAME_SOURCE__
 </script><script>
 (async()=>{
+cartridgeLoading=false;
 if(firstFailure)return;
 if(typeof createGame!=='function')throw new Error('The generated code did not define createGame(api).');
 const canvas=document.querySelector('canvas'),ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=false;
