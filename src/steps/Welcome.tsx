@@ -1,7 +1,10 @@
+import { useStudio } from '../studio'
+import { QuickBuild } from '../components/QuickBuild'
 import { Field } from '../components/ui'
 import type { StepProps } from './types'
 
 export function Welcome({ state, dispatch }: StepProps) {
+  const studio = useStudio()
   const t = state.template
   return <div className="welcome-view">
     <div className="hero-heading">
@@ -20,7 +23,7 @@ export function Welcome({ state, dispatch }: StepProps) {
         <div className="hero-controller"><div className="controller-face"><div className="controller-dpad" /><div className="controller-center"><span>SELECT &nbsp; START</span><i /><i /></div><div className="controller-buttons"><span>B</span><span>A</span></div></div></div>
       </div>
     </div>
-    <div className="welcome-grid"><section className="idea-card"><div className="flex items-center gap-3"><span className="section-number">01</span><div><h2 className="text-lg font-bold">Insert your idea.</h2><p className="text-xs text-zinc-400">A name, a world, a slightly ridiculous adventure.</p></div></div><div className="mt-6 grid gap-5"><Field label="What’s your game called?"><input className="input" autoFocus maxLength={100} value={t.gameTitle} placeholder="e.g. Midnight Moon Delivery" onChange={e => dispatch({ type: 'setMeta', patch: { gameTitle: e.target.value } })} /></Field><Field label="Give us the one-line pitch" hint="Who’s our hero? What’s their adventure?"><textarea className="input min-h-28" maxLength={3000} value={t.pitch} placeholder="A tiny space courier hops across rooftop gardens to deliver the last letter on the moon." onChange={e => dispatch({ type: 'setMeta', patch: { pitch: e.target.value } })} /></Field></div></section>
+    <div className="welcome-grid"><section className="idea-card"><div className="flex items-center gap-3"><span className="section-number">01</span><div><h2 className="text-lg font-bold">Insert your idea.</h2><p className="text-xs text-zinc-400">A name, a world, a slightly ridiculous adventure.</p></div></div><div className="mt-6 grid gap-5"><Field label="What’s your game called?"><input className="input" autoFocus maxLength={100} value={t.gameTitle} placeholder="e.g. Midnight Moon Delivery" onChange={e => dispatch({ type: 'setMeta', patch: { gameTitle: e.target.value } })} /></Field><Field label="Describe your game" hint="A paragraph is enough. Include your hero, world, controls and goal."><textarea className="input min-h-28" maxLength={3000} value={t.pitch} placeholder="A tiny space courier hops across rooftop gardens to deliver the last letter on the moon." onChange={e => dispatch({ type: 'setMeta', patch: { pitch: e.target.value } })} /></Field><QuickBuild prompt={(t.gameTitle ? t.gameTitle + ": " : "") + t.pitch} disabled={studio.busy || t.pitch.trim().length < 10} /></div></section>
     <aside className="starter-card"><span className="tiny-stars">★ ★ ★</span><p className="eyebrow">PACK-IN GAME INCLUDED</p><h2>Meet Charge Quest.</h2><p>A midnight driver. A nearly dead battery. One last chance to make it home.</p><div className="starter-tags"><span>2D PLATFORMER</span><span>2 STAGES</span><span>LOTS OF HEART</span></div><button className="btn-ghost w-full justify-center" onClick={() => dispatch({ type: 'loadExample' })}>Load the example game ↗</button><small>Ready to customize. Play the free starter at Review.</small></aside></div>
     <div className="how-it-works">{[['01','Design your adventure','Pick a mold, cast your heroes, set the scene.'],['02','Build it with OpenAI','Generate playable code and original game art.'],['03','Press start','Play, save, remix, download. It’s yours.']].map(([n,title,copy]) => <div key={n}><span>{n}</span><h3>{title}</h3><p>{copy}</p></div>)}</div>
     <p className="scope-note">Create original browser games here. Bring your own NES / SNES cartridges to ROM Lab.</p>

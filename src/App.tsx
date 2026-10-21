@@ -1,8 +1,10 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { createGame, generateStep, getConfig, getGame } from './api/generate'
+import { createGame, generateStep, getConfig, getGame, mutate } from './api/generate'
 import { validateGame, repairGame } from './api/validate'
 import { Create } from './components/Create'
-import { ApiKeyRequiredError, runGeneration } from './model/generation'
+import { ApiKeyRequiredError, runGeneration, runPromptGeneration, type GenerationPhase, type GenerationStage } from './model/generation'
+import type { GamePlan, TileReference } from './model/plan'
+import { Brand } from './components/Brand'
 import { GenerationStatus } from './components/GenerationStatus'
 import { Gallery } from './components/Gallery'
 import { RomLab } from './components/RomLab'
@@ -30,6 +32,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [generationMessage, setGenerationMessage] = useState('')
+  const [stages, setStages] = useState<GenerationStage[]>([])
+  const onPhase = (phase: GenerationPhase) => setStages(previous => {
+    const now = Date.now()
+    return [...previous.map(s => s.finishedAt ? s : { ...s, finishedAt: now }), { phase, startedAt: now }]
+  })
   const [withArt, setWithArt] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [revision, setRevision] = useState(0)
@@ -58,13 +65,14 @@ export default function App() {
   }
   const generate = async (starter = false, resumeId?: string, skipArt = false, repair: string | boolean = false) => {
     if (inFlight.current) return
-    inFlight.current = true; setBusy(true); setError(null); setPlaying(null)
+    inFlight.current = true; setBusy(true); setError(null); setPlaying(null); setStages([])
+    window.scrollTo({ top: 0, behavior: 'instant' })
     // A failed new request must never leave an older Play button behind.
     if (!resumeId) dispatch({ type: 'setJob', job: null })
     try {
       const game = await runGeneration({ template: structuredClone(state.template), apiKey, withArt, starter, resumeId, skipArt, repair },
         { getConfig, getGame, createGame, generateStep, validateGame, repairGame },
-        { onConfig: setConfig, onMessage: setGenerationMessage, onJob: job => dispatch({ type: 'setJob', job }) })
+        { onConfig: setConfig, onMessage: setGenerationMessage, onPhase, onJob: job => dispatch({ type: 'setJob', job }) })
       refresh(); setPage('gallery'); setPlaying(game)
     } catch (e) {
       setError((e as Error).message)
@@ -72,10 +80,28 @@ export default function App() {
       refresh()
     } finally { inFlight.current = false; setBusy(false) }
   }
+  const quickGenerate = async (prompt: string, reference?: TileReference) => {
+    if (inFlight.current) return
+    inFlight.current = true; setBusy(true); setError(null); setPlaying(null); setStages([])
+    window.scrollTo({ top: 0, behavior: 'instant' })
+    let saved = false
+    try {
+      const game = await runPromptGeneration({ prompt, reference, apiKey, withArt },
+        { getConfig, getGame, createGame, generateStep, validateGame, repairGame,
+          planGame: (prompt, reference, csrf, key) => mutate<GamePlan>('plan', { prompt, reference }, csrf, key) },
+        { onConfig: setConfig, onMessage: setGenerationMessage, onPhase, onJob: () => { saved = true } })
+      refresh(); setPage('gallery'); setPlaying(game)
+    } catch (e) {
+      setError((e as Error).message)
+      if (e instanceof ApiKeyRequiredError) setSettingsOpen(true)
+      if (saved) setPage('gallery')
+      refresh()
+    } finally { inFlight.current = false; setBusy(false) }
+  }
   const View = VIEWS[state.step], idx = stepIndex(state.step), blocked = blockReason(state), isLast = idx === STEPS.length - 1
-  return <StudioContext.Provider value={{ config, apiKey, setApiKey, settingsOpen, setSettingsOpen, busy, generationMessage, withArt, setWithArt, newGame: () => setPage('create'), error, setError, revision, refresh, generate, play: setPlaying, remix, showGallery: () => setPage('gallery') }}>
+  return <StudioContext.Provider value={{ config, apiKey, setApiKey, settingsOpen, setSettingsOpen, busy, generationMessage, withArt, setWithArt, newGame: () => setPage('create'), error, setError, revision, refresh, generate, quickGenerate, play: setPlaying, remix, showGallery: () => setPage('gallery') }}>
     <div className="studio-shell">
-      <aside className="studio-sidebar"><a href="#" className="brand" onClick={e => { e.preventDefault(); setPage('studio') }}><span className="brand-icon">G<span>✦</span></span><span>Game-Maker<small>HOMEBREW GAME SYSTEM</small></span></a>
+      <aside className="studio-sidebar"><a href="#" className="brand" onClick={e => { e.preventDefault(); setPage('studio') }}><Brand /></a>
         <div className="sidebar-switch"><button className={page === 'create' || page === 'studio' ? 'active' : ''} disabled={busy} onClick={() => { setPage('create'); setError(null) }}>✦ Create</button><button className={page === 'gallery' ? 'active' : ''} onClick={() => setPage('gallery')}>▦ Gallery</button></div>
         <button className="new-game-button" disabled={busy} onClick={() => { setPage('create'); setError(null) }}>＋ New game</button>
         <button className={`rom-nav-button ${page === 'rom' ? 'active' : ''}`} disabled={busy} onClick={() => { setPage('rom'); setError(null) }}>▤ ROM Lab <span>NES / SNES</span></button>
@@ -85,12 +111,12 @@ export default function App() {
       </aside>
       <div className="studio-main"><header className="top-bar"><div><span className="status-light" /> Game-Maker / CREATOR SYSTEM</div><span>{busy ? '✦ Building your cartridge…' : '● POWER ON'}</span></header>
         <main className="workspace"><Settings />{error && <div className="error-banner" role="alert"><p>{error}</p><button onClick={() => setError(null)} aria-label="Dismiss error">✕</button></div>}
-          {busy && <GenerationStatus message={generationMessage} />}
+          {busy && <GenerationStatus message={generationMessage} stages={stages} />}
           <div hidden={page !== 'rom'}><RomLab /></div>
           <div hidden={page !== 'create'}><Create state={state} startNew={startNewGame} continueDraft={() => setPage('studio')} openRoms={() => setPage('rom')} /></div>
           {page === 'rom' || page === 'create' ? null : page === 'gallery' ? <Gallery /> : <fieldset disabled={busy} className="min-w-0"><View state={state} dispatch={dispatch} /></fieldset>}
         </main>
-        {page === 'studio' && <footer className="wizard-footer"><button className="btn-ghost" disabled={idx === 0 || busy} onClick={() => dispatch({ type: 'back' })}>← Back</button><div className="footer-progress"><span>{blocked && !isLast ? blocked : '✓ Draft saved in this browser'}</span><div><i style={{ width: `${progress(state)}%` }} /></div></div>{!isLast ? <button className="btn-primary" disabled={!!blocked || busy} onClick={() => dispatch({ type: 'next' })}>Continue →</button> : <span className="text-xs text-zinc-500">06 / 06</span>}</footer>}
+        {page === 'studio' && !busy && <footer className="wizard-footer"><button className="btn-ghost" disabled={idx === 0 || busy} onClick={() => dispatch({ type: 'back' })}>← Back</button><div className="footer-progress"><span>{blocked && !isLast ? blocked : '✓ Draft saved in this browser'}</span><div><i style={{ width: `${progress(state)}%` }} /></div></div>{!isLast ? <button className="btn-primary" disabled={!!blocked || busy} onClick={() => dispatch({ type: 'next' })}>Continue →</button> : <span className="text-xs text-zinc-500">06 / 06</span>}</footer>}
       </div>
     </div>
     {playing && <Player key={playing.id} game={playing} close={() => setPlaying(null)} />}

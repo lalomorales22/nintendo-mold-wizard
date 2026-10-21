@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { crc32, deflateSync } from 'node:zlib'
 import { createContext, Script } from 'node:vm'
 import { exampleTemplate } from '../src/model/template'
 import type { ApiConfig, Cartridge } from '../src/model/types'
@@ -14,7 +15,20 @@ let planMode = 'valid'
 let codeOverride = ''
 let codeMode = 'valid', gameId = '', demoHtml = ''
 const key = 'sk-fixture-not-a-real-key-1234567890'
-const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5qkAAAAASUVORK5CYII='
+function sheetPng(opaque = false, width = 1024, height = 1024, empty = false) {
+  const header = Buffer.alloc(13); header.writeUInt32BE(width,0); header.writeUInt32BE(height,4); header[8]=8; header[9]=6
+  const pixels=Buffer.alloc((width*4+1)*height)
+  for(let y=0;y<height;y++) for(let x=0;x<width;x++) {
+    const offset=y*(width*4+1)+1+x*4
+    pixels[offset]=200; pixels[offset+1]=50; pixels[offset+2]=100
+    pixels[offset+3]=empty ? 0 : opaque || (x%128>32 && x%128<96 && y%128>32 && y%128<96) ? 255 : 0
+  }
+  const chunk=(name:string,data:Buffer)=>{const body=Buffer.concat([Buffer.from(name),data]),size=Buffer.alloc(4),crc=Buffer.alloc(4);size.writeUInt32BE(data.length);crc.writeUInt32BE(crc32(body));return Buffer.concat([size,body,crc])}
+  return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),chunk('IHDR',header),chunk('IDAT',deflateSync(pixels)),chunk('IEND',Buffer.alloc(0))]).toString('base64')
+}
+const png = sheetPng()
+let imageOverride = ''
+
 const tilePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAABACAYAAAD1Xam+AAAA4UlEQVR4nO3UIQEAIBDAwM9ECELQvwfEQOzE+anN2ucCTfM7APjHACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDMACDsAYi+Rs0dAR0HAAAAAElFTkSuQmCC'
 const generatedCode = 'function createGame(api){let score=0;return {update(dt){score+=dt;api.report({score,level:1,won:false})},render(ctx){ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)},save(){return {score}},load(d){if(d&&Number.isFinite(d.score))score=d.score}}}'
 type TestResponse = Omit<Response, 'json'> & { json(): Promise<ApiConfig & Cartridge & { game: Cartridge; games: Cartridge[] }> }
@@ -61,9 +75,9 @@ beforeAll(async () => {
       const payload = codeMode === 'invalid' ? {} : { summary: 'Generated playable test game', instructions: 'Arrows move.', artPrompt: 'Original pixel atlas', code: codeOverride || generatedCode }
       res.end(JSON.stringify({ status: codeMode === 'incomplete' ? 'incomplete' : 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }] }))
     } else if (req.url === '/v1/images/generations') {
-      imageCalls++; expect(data.output_format).toBe('png'); expect(data.prompt).toContain('3 columns by 2 rows')
+      imageCalls++; expect(data.output_format).toBe('png'); expect(data.prompt).toContain('8 columns by 8 rows'); expect(data.background).toBe('transparent'); expect(data.size).toBe('1024x1024'); expect(data.quality).toBe('medium')
       if (imageFailure) { res.statusCode=403; res.end(JSON.stringify({ error: { message: key } })) }
-      else res.end(JSON.stringify({ data: [{ b64_json: png }] }))
+      else res.end(JSON.stringify({ data: [{ b64_json: imageOverride || png }] }))
     } else { res.statusCode=404; res.end('{}') }
   })
   await new Promise<void>(r => fixture.listen(0, '127.0.0.1', r))
@@ -165,6 +179,62 @@ describe('PHP game pipeline', () => {
   })
 })
 
+describe('transparent image acceptance', () => {
+  it('rejects opaque, malformed and wrong-size images while keeping code resumable', async () => {
+    const g=await (await call('create',{template:exampleTemplate(),requestId:'transparent-images',withArt:true},{key})).json()
+    await call('step',{id:g.id},{key});await accept(g.id)
+    for(const invalid of [sheetPng(true), sheetPng(false,512,512), sheetPng(false,1024,1024,true), Buffer.from('not an image').toString('base64')]) {
+      imageOverride=invalid
+      try {
+        expect((await call('step',{id:g.id},{key})).status).toBe(502)
+        const saved=(await (await call('get',undefined,{id:g.id})).json()).game
+        expect(saved.state).toBe('code');expect(saved.hasArt).toBe(false)
+      } finally {imageOverride=''}
+    }
+    expect((await (await call('step',{id:g.id},{key})).json()).state).toBe('testing')
+    expect((await accept(g.id)).state).toBe('ready')
+  })
+})
+
+describe('legacy sprite background cleanup', () => {
+  it('removes only connected mattes, preserves internal colors and terrain, and saves a revision without paid calls', async () => {
+    const g=await (await call('demo',{template:exampleTemplate(),requestId:'legacy-background-fixture'})).json()
+    const beforeCalls=codeCalls+imageCalls
+    const fixtureSetup=spawnSync('php',['-r',`
+      $db=new PDO('sqlite:'.$argv[1].'/games.sqlite');$im=imagecreatetruecolor(1536,1024);
+      $navy=imagecolorallocate($im,16,24,39);$white=imagecolorallocate($im,240,230,220);imagefill($im,0,0,$navy);
+      for($i=0;$i<6;$i++){$x=($i%3)*512;$y=intdiv($i,3)*512;imagefilledrectangle($im,$x+128,$y+128,$x+384,$y+384,$white);imagefilledrectangle($im,$x+220,$y+220,$x+250,$y+250,$navy);}
+      ob_start();imagepng($im);$png=base64_encode(ob_get_clean());
+      $db->prepare('UPDATE games SET image=?,with_art=1,published=1 WHERE id=?')->execute([$png,$argv[2]]);
+    `,directory,g.id],{encoding:'utf8'})
+    expect(fixtureSetup.status,fixtureSetup.stderr).toBe(0)
+    expect((await call('clean-art',{id:g.id},{csrf:''})).status).toBe(403)
+    expect((await call('clean-art',undefined,{id:g.id})).status).toBe(405)
+    const cleaned=await (await call('clean-art',{id:g.id})).json()
+    expect(cleaned.state).toBe('testing');expect(cleaned.published).toBe(false)
+    const inspection=spawnSync('php',['-r',`
+      $db=new PDO('sqlite:'.$argv[1].'/games.sqlite');$q=$db->prepare('SELECT image FROM games WHERE id=?');$q->execute([$argv[2]]);$im=imagecreatefromstring(base64_decode($q->fetchColumn()));
+      $points=[];foreach([[0,0],[150,150],[230,230],[0,512],[1024,512]] as [$x,$y])$points[]=imagecolorsforindex($im,imagecolorat($im,$x,$y));
+      $q=$db->prepare('SELECT count(*) FROM game_revisions WHERE game_id=?');$q->execute([$argv[2]]);echo json_encode(['points'=>$points,'revisions'=>$q->fetchColumn()]);
+    `,directory,g.id],{encoding:'utf8'})
+    expect(inspection.status,inspection.stderr).toBe(0)
+    const result=JSON.parse(inspection.stdout)
+    expect(result.points.map((p:{alpha:number})=>p.alpha)).toEqual([127,0,0,0,127])
+    expect(result.points[2]).toMatchObject({red:16,green:24,blue:39})
+    expect(result.revisions).toBe(1)
+    expect(codeCalls+imageCalls).toBe(beforeCalls)
+    expect((await accept(g.id)).state).toBe('ready')
+    expect((await call('clean-art',{id:g.id})).status).toBe(422)
+    expect((await (await call('get',undefined,{id:g.id})).json()).game.state).toBe('ready')
+    const html=await (await call('play',undefined,{id:g.id})).text()
+    const config=JSON.parse(html.match(/const CONFIG=(.+);/)![1])
+    expect(config.assets).toMatchObject({version:'legacy-v1',columns:3,rows:2})
+    const repaired=await (await call('repair',{id:g.id},{key})).json()
+    expect(repaired.state).toBe('testing');expect(repaired.assets?.version).toBe('legacy-v1')
+    expect((await accept(g.id)).state).toBe('ready')
+  })
+})
+
 describe('actual starter gameplay', () => {
   function runtime() {
     const code=[...demoHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m=>m[1]).find(s=>s.startsWith('function createGame'))!
@@ -237,7 +307,7 @@ describe('runtime gate and AI plan API', () => {
     const messages:{type:string;message?:string}[]=[]
     const element={style:{},textContent:'',getContext:()=>ctx,addEventListener:()=>{},focus:()=>{}}
     const ctx={fillRect:()=>{},save:()=>{},restore:()=>{},drawImage:()=>{}}
-    class TestImage { width=1536; height=1024; async decode(){} }
+    class TestImage { width=1024; height=1024; async decode(){} }
     const listeners:Record<string,(e:{message:string;filename?:string})=>void>={}
     const context=createContext({document:{querySelector:()=>element,getElementById:()=>element,querySelectorAll:()=>[],addEventListener:()=>{}},parent:{postMessage:(v:{type:string;message?:string})=>messages.push(v)},window:{addEventListener:(name:string,fn:(e:{message:string})=>void)=>{listeners[name]=fn}},console,Set,Image:TestImage})
     for(const [,script] of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
@@ -254,6 +324,20 @@ describe('runtime gate and AI plan API', () => {
   })
   it('tests both drawn fallbacks and loaded sprite artwork', async () => {
     expect((await runProbe(generatedCode,'platformer-2d',true)).at(-1)?.type).toBe('moldforge-tested')
+  })
+  it('crops directional animation cells and freezes idle frames at a stable anchor', async () => {
+    const code=`function createGame(api){return {update(){},render(ctx){
+      ctx.fillRect(0,0,768,432); if(!api.art)return;
+      const check=(role,options,expected)=>{let got;api.actor({drawImage(...args){got=args.slice(1)}},role,20,30,40,50,options);if(JSON.stringify(got)!==JSON.stringify([...expected,128,128,20,30,40,50]))throw new Error('Wrong animation crop: '+JSON.stringify(got))};
+      check('hero',{direction:'down',moving:false,time:100},[0,0]);
+      check('hero',{direction:'left',moving:true,time:0},[128,128]);
+      check('hero',{direction:'right',moving:true,time:.125},[256,256]);
+      check('hero',{direction:'up',moving:true,time:.25},[384,384]);
+      check('enemy',{direction:'up',moving:false},[512,384]);
+      check('boss',{direction:'right',frame:3},[384,768]);
+      let crop;api.sprite({drawImage(...args){crop=args.slice(1)}},2,0,0,16,16);if(crop[0]!==512||crop[1]!==512)throw new Error('Wrong collectible cell');
+    },save(){return {}},load(){}}}`
+    expect((await runProbe(code,'top-down',true)).at(-1)).toMatchObject({type:'moldforge-tested'})
   })
   it('catches syntax, missing methods, input-path failures and checkpoint failures', async () => {
     const broken=[generatedCode.slice(0,-1),generatedCode.replace('render(ctx)','draw(ctx)'),generatedCode.replace('score+=dt','if(api.keys.has("ArrowRight"))missingHelper();score+=dt'),generatedCode.replace('if(d&&Number.isFinite(d.score))','if(Number.isFinite(d.score))'),generatedCode.replace('ctx.fillRect(0,0,768,432);api.sprite(ctx,0,10,10,32,32)',''),generatedCode.replace('ctx.fillRect(0,0,768,432)','ctx.fillRect(NaN,0,768,432)')]

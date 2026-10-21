@@ -1,12 +1,12 @@
 # Game-Maker
 
-An original retro game studio by Lalo Adrian Morales. Describe a world in the six-step editor, generate game code and sprite artwork with OpenAI, and keep the result as a playable cartridge.
+An original retro game studio by Lalo Adrian Morales. Describe a game in a paragraph and press **Generate & play**, or shape it in the six-step editor. OpenAI creates the plan, code and transparent sprite artwork; the finished game opens automatically and stays in your gallery.
 
 The existing React/TypeScript editor is paired with **one PHP API file**, `server/api.php`. No Composer dependencies, OpenAI SDK, external game engine, emulator or Node server is needed in production. Each finished game is a **single standalone HTML file** with its JavaScript and artwork embedded.
 
 ## Run locally
 
-Requirements: Node 22.12+; PHP 8.2+ with **cURL** and **PDO SQLite**. The existing npm dependencies are enough. Run `npm audit` before installing or updating packages.
+Requirements: Node 22.12+; PHP 8.2+ with **cURL**, **PDO SQLite** and **GD** (PNG validation/background cleanup). The existing npm dependencies are enough. Run `npm audit` before installing or updating packages.
 
 ```sh
 npm ci
@@ -36,15 +36,29 @@ This makes a real two-stage Charge Quest platformer with pixel artwork, enemies,
 
 Use **Create** or **New game** to choose **Start new game** or **Continue this draft**. Starting fresh clears the editor; saved gallery cartridges stay available. Download a draft's template JSON before replacing it if you want to keep that unfinished design.
 
+**Quick build:** On Create or the first Welcome screen, enter a paragraph and press **Generate & play**. It plans the characters, abilities, stages and rules, saves a new cartridge, generates and checks code, creates optional artwork, checks again, then opens the game. Your existing editor draft is not replaced. Planning uses one text request; code and artwork are separate requests. Errors after saving leave a resumable cartridge on your shelf. ROM Lab offers the same button with the current tile reference.
+
+**Manual builder:**
+
 1. Name the game and describe its premise.
 2. Pick a mold, define heroes/enemies and their abilities, add stages, and set physics and win/lose conditions.
 3. In Review, choose whether to generate original artwork, then **Generate game**.
-4. The server saves a private draft before requesting any content. OpenAI writes a complete Canvas game. A separate image request creates a 3×2 sprite atlas (hero, enemy, collectible, terrain, background, boss), exposed to the generated code through the player API.
+4. The server saves a private draft before requesting any content. OpenAI writes a complete Canvas game. A separate image request creates a transparent animated sprite sheet, exposed through the player’s shared animation helpers.
 5. The finished cartridge opens in the isolated player and remains in **My cartridges**. Play it, heart it, download the standalone HTML, remix its template, or explicitly **Publish to arcade**.
 
 Code, runtime checks and art are separate recoverable stages. Before buying art, and again with the atlas loaded, an opaque-origin sandbox checks JavaScript startup, all four required functions (`update`, `render`, `save`, `load`), simulated control input, canvas drawing and finite coordinates, checkpoint round-trip, malformed saves and restart. Failed checks retain the cartridge in `testing` and prevent Play, download or publication. The owner may explicitly choose **Repair & test · uses API**; this requests corrected code and preserves the previous payload/art in the private `game_revisions` table. No automatic paid repair requests run. Passing is a runtime smoke check, not proof of genre fidelity, game balance or every level being beatable. The browser reports acceptance for the exact payload/art hash; this is an owner workflow check, not a security certification. An image failure preserves the game code. Resume from the gallery, or **Finish without art** to use the code’s drawn fallbacks. The generation display names the current step and shows elapsed time. OpenAI requests return complete steps, so the app does not claim a live completion percentage. There are no hidden paid retries. Keep the tab open during generation; after an interrupted request, a lock can remain for up to four minutes. Completed stages are reused on resume. A timeout occurring after OpenAI accepted a request can still incur a charge; retrying that incomplete stage is a new request.
 
 Editing a draft clears its previous generation result so **Play** cannot open an older design. **Generate again** creates a separate cartridge; **Resume saved cartridge** continues an existing one. Missing keys and request failures appear beside the generation controls, and missing-key attempts open API settings. Existing drafts are preserved when upgrading, but old generation links without a matching template are cleared; those games remain in the gallery.
+
+### Sprite sheets and backgrounds
+
+New code uses a versioned **1024×1024 transparent PNG**, generated at medium quality with `background: transparent`. PHP checks PNG decoding, exact dimensions, real alpha and nonempty artwork. An opaque or invalid result fails only the art stage; code is retained, with no automatic paid retry. `gpt-image-2` transparency is currently a preview feature ([official image guide](https://developers.openai.com/cookbook/examples/multimodal/image-gen-models-prompting-guide)).
+
+The sheet has **8×8 cells, 128 pixels each**. Hero occupies the top-left 4×4 block, enemy the top-right block and boss the bottom-left block. Each block has down/left/right/up rows; each row has idle and three walk poses. The bottom-right block begins with collectible, terrain and decoration; remaining cells are empty. The host crops exact cells with fixed anchors. `api.actor(ctx, 'hero', x, y, w, h, {direction: 'left', moving: true})` runs an 8fps walk cycle on the game clock, pauses with the game and returns to idle when movement stops. Optional `time` or `frame` selects a pose explicitly. Generated code supplies the actual movement and facing; `api.sprite` retains the six logical asset indices for props and compatibility. World backgrounds are drawn separately.
+
+**Gallery → View sprites** previews directions and animation, downloads the full PNG, or cuts out the selected frame at its original resolution with transparency intact. AI layout/pose consistency still needs visual review; image validation cannot prove that every pose or character is correctly drawn.
+
+Old cartridges keep their six-cell layout, including during code repairs. In their sprite viewer, **Remove solid sprite backgrounds** performs free PHP cleanup of border-connected, nearly uniform colors in hero/enemy/collectible/boss cells. It preserves disconnected interior colors, terrain and scenery, saves the original payload/art as a private revision, unpublishes the changed cartridge, and requires a new runtime check before play. It does not recover animations or remove complex scenery. Generate a new game to get the directional sheets.
 
 ### Player and saves
 

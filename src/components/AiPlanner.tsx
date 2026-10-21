@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { QuickBuild } from './QuickBuild'
 import { getConfig, mutate } from '../api/generate'
 import { planToTemplate, type GamePlan, type TileReference } from '../model/plan'
 import { getMold } from '../model/molds'
@@ -35,13 +36,14 @@ export function AiPlanner({ reference, sourceKey = 'idea' }: { reference?: TileR
     finally { running.current = false; setBusy(false) }
   }
   return <section className="ai-planner card">
-    <p className="eyebrow">IDEA → GAME PLAN → PLAY</p><h2>Let AI fill in the blanks.</h2>
-    <p className="rom-note">A game is a <b>character</b> with <b>abilities</b>, in a <b>world</b> with <b>obstacles, rewards and rules</b>. Tell us what you want; AI turns it into a small, buildable plan.</p>
+    <p className="eyebrow">IDEA → GAME PLAN → PLAY</p><h2>One idea. Press start.</h2>
+    <p className="rom-note">A game is a <b>character</b> with <b>abilities</b>, in a <b>world</b> with <b>obstacles, rewards and rules</b>. Tell us what you want; AI fills in the details and builds it.</p>
     {reference && <figure className="ai-reference"><img src={reference.image} alt="The current decoded tile page to include in the AI plan" /><figcaption>{reference.label}<br />Preview colors. Tile roles and gameplay are AI proposals for you to review.</figcaption></figure>}
     <label className="label" htmlFor={`ai-idea-${sourceKey === 'idea' ? 'new' : 'rom'}`}>What should the new game be?</label>
-    <textarea id={`ai-idea-${sourceKey === 'idea' ? 'new' : 'rom'}`} className="input" rows={4} maxLength={3000} value={prompt} onChange={e => { setPrompt(e.target.value); setError('') }} placeholder="A penguin boxer fights through three icy arenas. Z punches, X blocks. Win each round to face a bigger rival. Use chunky pixel art and make it easy to learn." />
-    <p className="rom-note">{reference ? 'Sends this tile page, its format/offset label and your description to OpenAI. Your ROM file stays local.' : 'Sends your description to OpenAI.'} Creates a new browser game plan; does not recover the original ROM’s rules or build a console ROM.</p>
-    <button className="btn-primary" disabled={busy || studio.busy || prompt.trim().length < 10} onClick={() => void analyze()}>{busy ? 'Analyzing and planning…' : 'Create AI game plan →'}</button>
+    <textarea id={`ai-idea-${sourceKey === 'idea' ? 'new' : 'rom'}`} className="input" disabled={studio.busy} rows={4} maxLength={3000} value={prompt} onChange={e => { setPrompt(e.target.value); setError('') }} placeholder="A penguin boxer fights through three icy arenas. Z punches, X blocks. Win each round to face a bigger rival. Use chunky pixel art and make it easy to learn." />
+    <p className="rom-note">{reference ? 'Sends this tile page, its format/offset label and your description to OpenAI. Your ROM file stays local.' : 'Sends your description to OpenAI.'} Builds an original browser game.</p>
+    <QuickBuild prompt={prompt} reference={reference} disabled={busy || studio.busy || prompt.trim().length < 10} />
+    <button className="btn-ghost mt-4" disabled={busy || studio.busy || prompt.trim().length < 10} onClick={() => void analyze()}>{busy ? 'Analyzing and planning…' : 'Just make a plan first →'}</button>
     {busy && <p role="status" className="rom-note">Your plan is being written. Changes to the idea or tiles discard this request’s result.</p>}
     {error && <p role="alert" className="error-banner">{error}</p>}
     {plan && <div className="ai-plan-result">

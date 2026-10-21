@@ -97,7 +97,6 @@ export function Review({ state }: StepProps) {
         {job && (
           <div className="mt-4">
             <div className="flex justify-between text-xs text-zinc-400"><span>{GENERATION_LABELS[job.status]}</span><span>{running ? 'In progress' : job.status === 'done' ? 'Complete' : 'Not running'}</span></div>
-            {running && <progress className="generation-progress" aria-label="Generation in progress" />}
             <pre className="mt-3 max-h-48 overflow-auto rounded bg-black/40 p-3 text-xs text-zinc-300">{job.log.join('\n')}</pre>
             {job.result && (
               <div className="mt-3 text-sm">

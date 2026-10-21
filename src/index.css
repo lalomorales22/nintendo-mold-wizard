@@ -308,4 +308,43 @@ input[type="checkbox"] { accent-color: #d92e36; }
   * { transition: none !important; scroll-behavior: auto !important; }
 }
 
-.generation-progress { display: block; width: 100%; height: 6px; margin-top: 8px; accent-color: #bd2029; }
+
+/* Original cartridge badge and pixel wordmark. No remote fonts or assets. */
+.brand { gap: 9px; }
+.brand-cartridge { width: 35px; height: 42px; flex: 0 0 35px; filter: drop-shadow(2px 3px 0 #b5a893); }
+.brand-lettering { min-width: 0; flex: 1; }
+.brand-lettering svg { display: block; width: 100%; max-width: 190px; filter: drop-shadow(1px 2px 0 #c7b79d); }
+.brand-lettering small { font-size: 6.5px; letter-spacing: 1.45px; margin-top: 4px; }
+.quick-build { margin-top: 18px; padding-top: 18px; border-top: 1px solid #77685166; }
+.quick-art { display: flex; align-items: center; gap: 9px; font-size: 12px; color: #dfd6bf; margin-bottom: 16px; }
+.launch-button { width: 100%; justify-content: center; min-height: 56px; font: 900 17px/1.2 "Courier New", monospace; letter-spacing: .8px; text-transform: uppercase; border: 2px solid #ff8c79; box-shadow: 0 5px 0 #791a1d, 0 8px 20px #0004; }
+.launch-button span { font-size: 13px; padding: 6px; border: 1px solid #ffb29b; border-radius: 50%; }
+.launch-button:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 2px 0 #791a1d; }
+.quick-build p { margin: 16px 0 0; font-size: 11px; line-height: 1.7; color: #b9b3a1; }
+.generation-heading { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 12px; }
+.generation-heading .eyebrow { margin: 0; font-size: 10px; }
+.generation-stages { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; padding: 0; list-style: none; }
+.generation-stages li { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 8px; padding: 10px 12px; background: #201f1d; border: 1px solid #71614e; border-radius: 3px; font-size: 11px; }
+.generation-stages .complete { color: #b1c79c; border-color: #566147; }
+.generation-stages .current { background: #50302b; border-color: #ef836f; color: #ffe6c2; }
+.generation-stages time { font: 10px monospace; opacity: .8; }
+.current .stage-light { animation: power-pulse 1.4s ease-in-out infinite; }
+.generation-explainer { font-size: 11px; opacity: .8; line-height: 1.6; }
+@keyframes power-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .current .stage-light { animation: none; } }
+@media (max-width: 699px) { .brand-lettering { flex: 0 1 175px; } }
+.sprite-dialog { width: min(920px,94vw); max-height: 90vh; overflow: auto; margin: auto; padding: 24px; border: 2px solid #a99a7c; border-radius: 8px; color: #f4e9ce; background: #242927; box-shadow: 0 20px 80px #000a; }
+.sprite-dialog::backdrop { background: #10120fe6; }
+.sprite-dialog header { display:flex; justify-content: space-between; gap: 12px; align-items: start; }
+.sprite-dialog h2 { font: bold 24px "Courier New",monospace; }
+.sprite-description { font-size: 12px; line-height: 1.7; color: #b5b5a6; margin: 16px 0; }
+.sprite-workbench { display: grid; grid-template-columns: 220px 1fr; gap: 28px; }
+.sprite-preview,.sprite-atlas { background: repeating-conic-gradient(#969b8e 0% 25%,#c8cbbc 0% 50%) 0/20px 20px; position: relative; }
+.sprite-preview { display:grid; place-items:center; padding:12px; margin-bottom: 18px; }
+.sprite-preview canvas { width:100%; height:192px; object-fit:contain; image-rendering:pixelated; }
+.sprite-atlas img { width:100%; display:block; image-rendering:pixelated; }
+.sprite-grid { position:absolute; inset:0; pointer-events:none; background-image:linear-gradient(to right,#cf292f88 1px,transparent 1px),linear-gradient(to bottom,#cf292f88 1px,transparent 1px); }
+.sprite-workbench .label { display:block; margin-bottom:16px; }
+.sprite-clean { padding-top: 20px; margin-top:20px; border-top:1px solid #596051; }
+.sprite-clean p { font-size:11px; line-height:1.6; color:#b5b5a6; margin-top:12px; }
+@media(max-width:600px) { .sprite-workbench { grid-template-columns:1fr; } .sprite-preview canvas { width:192px; } }

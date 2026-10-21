@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiKeyRequiredError, runGeneration } from './generation'
+import { ApiKeyRequiredError, runGeneration, runPromptGeneration, type GenerationPhase } from './generation'
+import type { GamePlan } from './plan'
 import { exampleTemplate } from './template'
 import type { ApiConfig, Cartridge, GameTemplate, GenerationJob } from './types'
 import { templateKey } from './wizard'
@@ -120,5 +121,56 @@ describe('runtime acceptance gate', () => {
     expect(service.repairGame).toHaveBeenCalledWith(game.id, 'test-token', '', 'Missing helper')
     expect(service.validateGame).toHaveBeenCalledTimes(2)
     expect(service.createGame).toHaveBeenCalledTimes(1)
+  })
+})
+
+const quickPlan: GamePlan = {
+  title: 'Moon Mail', pitch: 'A penguin delivers moon letters.', perspective: 'top-down', coreLoop: 'Dodge rivals and deliver letters.', visualStyle: 'Blue and gold pixels', observations: 'Based on description.', assumptions: 'One short stage.',
+  hero: {name:'Pip',description:'Penguin courier',ability:'Dash',abilityDescription:'Dash with Z'}, enemy:{name:'Crab',description:'Moon crab'},
+  levels:[{name:'Moon port',layout:'Open paths around rocks',goal:'Reach the mailbox'}],win:'Deliver the mail',lose:'Lose all lives',
+}
+describe('paragraph to playable cartridge', () => {
+  it('plans once, uses that template, saves and tests before returning the playable game', async () => {
+    const {service,events,jobs,cartridges}=setup()
+    const phases: GenerationPhase[]=[]
+    const planGame=vi.fn(async()=>quickPlan)
+    const request={prompt:'A penguin courier delivers letters on the moon.',apiKey:'',withArt:true}
+    const result=await runPromptGeneration(request,{...service,planGame},{...events,onPhase:p=>phases.push(p)})
+    expect(result.state).toBe('ready');expect(result.title).toBe('Moon Mail')
+    expect(planGame).toHaveBeenCalledOnce();expect(service.getConfig).toHaveBeenCalledOnce()
+    expect(cartridges.get(result.id)?.template.characters[0].name).toBe('Pip')
+    expect(jobs.at(-1)?.templateKey).toBe(templateKey(cartridges.get(result.id)!.template))
+    expect(phases).toEqual(['settings','plan','save','code','test-code','art','test-art','ready'])
+    expect(request.prompt).toBe('A penguin courier delivers letters on the moon.')
+  })
+  it('takes a snapshot before awaiting planning and preserves optional ROM tile references', async () => {
+    const {service,events,cartridges}=setup()
+    const reference={image:'data:image/png;base64,fixture',label:'Original tile page'}
+    const request={prompt:'Moon penguin delivery game.',reference,apiKey:'',withArt:false}
+    const planGame=vi.fn(async()=>quickPlan)
+    const pending=runPromptGeneration(request,{...service,planGame},events)
+    request.prompt='Edited while building'; reference.label='Another ROM'
+    const result=await pending
+    expect(planGame.mock.calls[0]).toEqual(['Moon penguin delivery game.',{image:'data:image/png;base64,fixture',label:'Original tile page'},'test-token',''])
+    expect(cartridges.get(result.id)?.template.referenceTiles?.label).toBe('Original tile page')
+  })
+  it('does not buy code or art when planning fails or a key is missing', async () => {
+    for(const hasKey of [false,true]) {
+      const {service,events}=setup(hasKey)
+      const planGame=vi.fn(async()=>{throw new Error('Planning unavailable')})
+      await expect(runPromptGeneration({prompt:'Moon penguin delivery game.',apiKey:'',withArt:true},{...service,planGame},events)).rejects.toThrow()
+      expect(service.createGame).not.toHaveBeenCalled();expect(service.generateStep).not.toHaveBeenCalled()
+      expect(planGame).toHaveBeenCalledTimes(hasKey?1:0)
+    }
+  })
+  it('keeps a failed quick-build cartridge available for explicit resume', async () => {
+    const {service,events,jobs}=setup()
+    service.generateStep.mockRejectedValueOnce(new Error('Provider unavailable'))
+    const planGame=vi.fn(async()=>quickPlan)
+    await expect(runPromptGeneration({prompt:'Moon penguin delivery game.',apiKey:'',withArt:true},{...service,planGame},events)).rejects.toThrow('Provider unavailable')
+    const saved=jobs.at(-1)!
+    expect(saved.status).toBe('failed')
+    const result=await runGeneration({template:exampleTemplate(),apiKey:'',withArt:true,resumeId:saved.id},service,events)
+    expect(result.id).toBe(saved.id);expect(result.title).toBe('Moon Mail');expect(planGame).toHaveBeenCalledOnce()
   })
 })

@@ -1,3 +1,4 @@
+import type { TileReference } from './model/plan'
 import { createContext, useContext } from 'react'
 import type { ApiConfig, Cartridge, GameTemplate } from './model/types'
 
@@ -17,6 +18,7 @@ export interface Studio {
   revision: number
   refresh: () => void
   generate: (starter?: boolean, resumeId?: string, skipArt?: boolean, repair?: string | boolean) => Promise<void>
+  quickGenerate: (prompt: string, reference?: TileReference) => Promise<void>
   play: (game: Cartridge) => void
   remix: (template: GameTemplate) => void
   showGallery: () => void

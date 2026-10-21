@@ -128,7 +128,17 @@ export interface GenerationJob {
   result?: { title: string; files: string[]; note: string }
 }
 
+export interface AssetManifest {
+  version: 'legacy-v1' | 'animated-v1'
+  columns: number
+  rows: number
+  frames: number
+  directions: string[]
+  actors: Record<string, [number, number]>
+  slots: [number, number][]
+}
 export interface Cartridge {
+  assets?: AssetManifest
   id: string
   title: string
   pitch: string
