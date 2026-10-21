@@ -3,6 +3,7 @@ import { createGame, generateStep, getConfig, getGame } from './api/generate'
 import { Create } from './components/Create'
 import { ApiKeyRequiredError, runGeneration } from './model/generation'
 import { Gallery } from './components/Gallery'
+import { RomLab } from './components/RomLab'
 import { Player } from './components/Player'
 import { Settings } from './components/Settings'
 import { loadState, saveState } from './model/storage'
@@ -21,7 +22,7 @@ const VIEWS: Record<StepId, (p: StepProps) => React.JSX.Element> = { welcome: We
 
 export default function App() {
   const [state, dispatch] = useReducer(wizardReducer, undefined, () => loadState())
-  const [page, setPage] = useState<'create' | 'studio' | 'gallery'>('studio')
+  const [page, setPage] = useState<'create' | 'studio' | 'gallery' | 'rom'>('studio')
   const [config, setConfig] = useState<ApiConfig | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -72,17 +73,19 @@ export default function App() {
   const View = VIEWS[state.step], idx = stepIndex(state.step), blocked = blockReason(state), isLast = idx === STEPS.length - 1
   return <StudioContext.Provider value={{ config, apiKey, setApiKey, settingsOpen, setSettingsOpen, busy, generationMessage, withArt, setWithArt, newGame: () => setPage('create'), error, setError, revision, refresh, generate, play: setPlaying, remix, showGallery: () => setPage('gallery') }}>
     <div className="studio-shell">
-      <aside className="studio-sidebar"><a href="#" className="brand" onClick={e => { e.preventDefault(); setPage('studio') }}><span className="brand-icon">M<span>✦</span></span><span>MOLDFORGE<small>THE LITTLE GAME STUDIO</small></span></a>
-        <div className="sidebar-switch"><button className={page !== 'gallery' ? 'active' : ''} disabled={busy} onClick={() => { setPage('create'); setError(null) }}>✦ Create</button><button className={page === 'gallery' ? 'active' : ''} onClick={() => setPage('gallery')}>▦ Gallery</button></div>
+      <aside className="studio-sidebar"><a href="#" className="brand" onClick={e => { e.preventDefault(); setPage('studio') }}><span className="brand-icon">M<span>✦</span></span><span>MOLDFORGE<small>HOMEBREW GAME SYSTEM</small></span></a>
+        <div className="sidebar-switch"><button className={page === 'create' || page === 'studio' ? 'active' : ''} disabled={busy} onClick={() => { setPage('create'); setError(null) }}>✦ Create</button><button className={page === 'gallery' ? 'active' : ''} onClick={() => setPage('gallery')}>▦ Gallery</button></div>
         <button className="new-game-button" disabled={busy} onClick={() => { setPage('create'); setError(null) }}>＋ New game</button>
-        <p className="sidebar-caption">YOUR NEXT GREAT GAME</p>
+        <button className={`rom-nav-button ${page === 'rom' ? 'active' : ''}`} disabled={busy} onClick={() => { setPage('rom'); setError(null) }}>▤ ROM Lab <span>NES / SNES</span></button>
+        <p className="sidebar-caption">BUILD YOUR NEXT GAME</p>
         <ol className="wizard-nav">{STEPS.map((s, i) => <li key={s}><button disabled={i > state.maxReached || busy} className={page === 'studio' && s === state.step ? 'active' : ''} onClick={() => { dispatch({ type: 'goto', step: s }); setPage('studio') }}><span className="step-number">{i < idx ? '✓' : `0${i + 1}`}</span>{STEP_LABELS[s]}{page === 'studio' && s === state.step && <span className="step-dot" />}</button></li>)}</ol>
         <div className="sidebar-bottom"><div className="studio-note"><span>✧</span><p>Made for the games<br />you wish existed.</p></div><button className="key-button" onClick={() => setSettingsOpen(!settingsOpen)}><span className={`connection-dot ${apiKey || config?.serverKeyAvailable ? 'connected' : ''}`} />{apiKey || config?.serverKeyAvailable ? 'OpenAI key ready' : 'Connect OpenAI'}<span>↗</span></button><p className="sidebar-fine">Original games. Old-school soul.<br />Built by Lalo Adrian Morales.</p></div>
       </aside>
-      <div className="studio-main"><header className="top-bar"><div><span className="status-light" /> INDEPENDENT GAME MAKING CLUB</div><span>{busy ? '✦ Forging your cartridge…' : '● ALL IDEAS WELCOME'}</span></header>
+      <div className="studio-main"><header className="top-bar"><div><span className="status-light" /> MOLDFORGE / CREATOR SYSTEM</div><span>{busy ? '✦ Forging your cartridge…' : '● POWER ON'}</span></header>
         <main className="workspace"><Settings />{error && <div className="error-banner" role="alert"><p>{error}</p><button onClick={() => setError(null)} aria-label="Dismiss error">✕</button></div>}
           {busy && <div className="generation-notice" role="status" aria-live="polite">✦ {generationMessage}</div>}
-          {page === 'create' ? <Create state={state} startNew={startNewGame} continueDraft={() => setPage('studio')} /> : page === 'gallery' ? <Gallery /> : <fieldset disabled={busy} className="min-w-0"><View state={state} dispatch={dispatch} /></fieldset>}
+          <div hidden={page !== 'rom'}><RomLab /></div>
+          {page === 'rom' ? null : page === 'create' ? <Create state={state} startNew={startNewGame} continueDraft={() => setPage('studio')} openRoms={() => setPage('rom')} /> : page === 'gallery' ? <Gallery /> : <fieldset disabled={busy} className="min-w-0"><View state={state} dispatch={dispatch} /></fieldset>}
         </main>
         {page === 'studio' && <footer className="wizard-footer"><button className="btn-ghost" disabled={idx === 0 || busy} onClick={() => dispatch({ type: 'back' })}>← Back</button><div className="footer-progress"><span>{blocked && !isLast ? blocked : '✓ Draft saved in this browser'}</span><div><i style={{ width: `${progress(state)}%` }} /></div></div>{!isLast ? <button className="btn-primary" disabled={!!blocked || busy} onClick={() => dispatch({ type: 'next' })}>Continue →</button> : <span className="text-xs text-zinc-500">06 / 06</span>}</footer>}
       </div>

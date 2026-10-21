@@ -54,6 +54,23 @@ Editing a draft clears its previous generation result so **Play** cannot open an
 - Games execute in an iframe with scripts enabled, no same-origin access and a Content Security Policy that blocks network access, external scripts, forms and embeds. Credentials never enter a cartridge. Generated JavaScript is never executed on the PHP server.
 - Generated code may still contain gameplay or runtime mistakes. The player reports runtime errors; remix and regenerate if needed. It is not an automatic gameplay certification system.
 
+## ROM Lab: edit your own NES / SNES cartridges
+
+The studio now uses a classic console theme: gray housing, charcoal panels, red controls, cartridge shelves and original controller artwork. Open **ROM Lab** in the sidebar or from **Create** to import a cartridge you built.
+
+- Import `.nes`, `.snes`, `.sfc` or `.smc` files up to 8 MiB plus a 512-byte copier header. File contents are validated, not just the extension.
+- **Cartridge map:** iNES / NES 2.0 PRG, CHR, trainer, mapper and submapper information; inferred SNES LoROM, HiROM and ExHiROM headers. Additional NES data and SNES copier headers are preserved.
+- **Tile editor:** decode and paint NES CHR graphics or uncompressed SNES 2/4/8bpp planar tiles at an explicit file offset. Colors are a preview palette; editing pixels changes palette indices, not the game's palette. CHR RAM games have no automatically editable CHR ROM section. SNES tiles need an offset from your source/map file; arbitrary bytes may be code or compressed data.
+- **Hex editor:** browse file offsets, select a byte, enter a hexadecimal value, and apply the change. The last 200 edits can be undone/redone during that open editing session. Reopening a project resets undo history but retains its original ROM.
+- **SNES metadata:** edit the 21-character ASCII cartridge title. Explicit checksum repair supports ordinary LoROM/HiROM/ExHiROM layouts whose declared size matches a power-of-two ROM or two power-of-two regions. It includes the standard mirrored tail and excludes the copier header. Unusual sizes and special-chip mappings leave repair disabled.
+- **Export:** download the untouched original, an edited ROM of the same size, or an IPS patch against that original. IPS needs the exact original file, including any copier header. Checksums are only changed when you click **Repair checksum** or edit those bytes yourself.
+
+ROMs are read locally and saved with their originals in **IndexedDB in this browser**. They are never uploaded to PHP, OpenAI or the community gallery. The ROM shelf is separate from generated HTML games; changing ROM projects leaves the current game-builder draft intact. Download backups before clearing browser data. If browser storage fails or is full, the app reports that the changes are not saved and still allows an edited ROM download.
+
+This is a cartridge inspector and binary/tile editor. It does **not** decompile a complete source project, automatically discover level layouts, decompress game-specific graphics, import ROMs into the OpenAI wizard, or emulate NES/SNES games in the browser. Test edited ROMs in your existing emulator or hardware workflow. Interleaved SNES images and unusual/headerless homebrew layouts need a dedicated importer; `.snes` alone cannot identify the internal layout.
+
+Format references: [iNES](https://www.nesdev.org/wiki/INES), [NES 2.0](https://www.nesdev.org/wiki/NES_2.0), [NES pattern tables](https://www.nesdev.org/wiki/PPU_pattern_tables), [SNES cartridge headers and checksums](https://snes.nesdev.org/wiki/ROM_header), [SNES tile formats](https://snes.nesdev.org/wiki/Tiles), and [IPS format](https://sneslab.net/wiki/IPS_file_format). All format code is local; no emulator, ROM parser, or other dependency was downloaded or added for this feature.
+
 ## Gallery ownership
 
 Private games are associated with a random, HttpOnly, SameSite cookie. Only that browser can view, resume, publish, unpublish or delete them. Public games and their templates are readable by other visitors; only the creator can change them. Hearts and checkpoints are browser-local. There are **no user accounts or cross-device login** yet. Clearing the owner cookie loses private-library access: download cartridges you want to keep permanently.
@@ -95,7 +112,7 @@ npm run build       # dist/ including PHP and Apache protections
 npm run preview     # preview production frontend with PHP
 ```
 
-The integration tests launch an isolated PHP server and a **local fixture of OpenAI**, exercise both real HTTP request contracts, image-failure recovery, idempotent creation, private/public access, download sandboxing, invalid input, quota errors, and persistence after restart. They execute the actual starter JavaScript to verify movement, progression, win/lose and restart. No test makes a paid API call or uses your `.env` key. Live AI output quality and hosted deployment require separate verification with a real key/host.
+The integration tests launch an isolated PHP server and a **local fixture of OpenAI**, exercise both real HTTP request contracts, image-failure recovery, idempotent creation, private/public access, download sandboxing, invalid input, quota errors, and persistence after restart. They execute the actual starter JavaScript to verify movement, progression, win/lose and restart. ROM tests use synthetic cartridge fixtures to validate layout detection, malformed inputs, tile decoding/painting, title edits, mirrored checksums, and independent IPS application (including long records and the reserved EOF offset). Browser checks cover import, paint, undo/redo, reload persistence, and independently verified NES/SNES downloads. These checks do not establish that an arbitrary edited ROM will boot. No test makes a paid API call or uses your `.env` key. Live AI output quality and hosted deployment require separate verification with a real key/host.
 
 - `server/api.php`: key loading, validation, SQLite, OpenAI calls, game packaging and starter engine.
 - `scripts/dev.mjs`: starts PHP and Vite together.
@@ -105,11 +122,12 @@ The integration tests launch an isolated PHP server and a **local fixture of Ope
 - `src/model/generation.ts`: generation attempts, explicit resume, progress and template-bound results.
 - `src/api/generate.ts`: real API calls; errors are never replaced with mock success.
 - `src/model/`: editable template, molds, wizard state and browser persistence.
+- `src/components/RomLab.tsx` and `src/rom/`: local ROM shelf, cartridge analysis, tile/hex editing and export.
 
 API references: [Responses / Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs), [Image generation](https://developers.openai.com/api/reference/resources/images/methods/generate).
 
 ## Scope
 
-These are original **Nintendo-era-inspired browser games**, not NES/SNES ROMs or Nintendo hardware builds. 3D molds request a Canvas-rendered projected or raycast interpretation. The mold catalog is hand-authored; actual REA mold extraction remains future work. No Nintendo assets or ROMs are included, and the project is not affiliated with Nintendo.
+OpenAI-generated games are original **Nintendo-era-inspired browser games**, not NES/SNES ROMs or Nintendo hardware builds. ROM Lab separately edits user-supplied cartridge files. 3D molds request a Canvas-rendered projected or raycast interpretation. The mold catalog is hand-authored; actual REA mold extraction remains future work. No Nintendo assets or ROMs are included, and the project is not affiliated with Nintendo.
 
 MIT license.

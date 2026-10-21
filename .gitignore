@@ -29,3 +29,10 @@ dist-ssr
 !.env.example
 .moldforge/
 release/
+
+# Local cartridge inputs and exports
+*.nes
+*.snes
+*.sfc
+*.smc
+*.ips
